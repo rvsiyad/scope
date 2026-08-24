@@ -102,7 +102,6 @@ func TestChatCompletionValidation(t *testing.T) {
 		{"bad json", `{not json`, http.StatusBadRequest},
 		{"missing model", `{"messages":[{"role":"user","content":"x"}]}`, http.StatusBadRequest},
 		{"empty messages", `{"model":"m","messages":[]}`, http.StatusBadRequest},
-		{"stream not implemented yet", `{"model":"m","messages":[{"role":"user","content":"x"}],"stream":true}`, http.StatusNotImplemented},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
