@@ -10,7 +10,30 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 1 — data plane scaffolding.
+Status: session 1 — streaming proxy working end to end (Ollama provider).
+
+## Use it like OpenAI
+
+```py
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8090/v1", api_key="unused-for-now")
+stream = client.chat.completions.create(
+    model="llama3.2:1b",
+    messages=[{"role": "user", "content": "hello"}],
+    stream=True,
+)
+```
+
+Or watch the SSE stream raw:
+
+```sh
+curl -N localhost:8090/v1/chat/completions -d '{
+  "model": "llama3.2:1b",
+  "messages": [{"role":"user","content":"count to five"}],
+  "stream": true
+}'
+```
 
 ## Layout
 

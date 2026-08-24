@@ -45,6 +45,29 @@ type Usage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+// ChatChunkResponse is one SSE event in a streaming completion
+// ("object":"chat.completion.chunk" in OpenAI's dialect).
+type ChatChunkResponse struct {
+	ID      string        `json:"id"`
+	Object  string        `json:"object"`
+	Created int64         `json:"created"`
+	Model   string        `json:"model"`
+	Choices []ChunkChoice `json:"choices"`
+}
+
+type ChunkChoice struct {
+	Index int   `json:"index"`
+	Delta Delta `json:"delta"`
+	// FinishReason must serialize as JSON null until the final chunk, hence
+	// the pointer.
+	FinishReason *string `json:"finish_reason"`
+}
+
+type Delta struct {
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
 // apiError is the OpenAI error envelope; SDKs parse it into typed exceptions,
 // so error responses must use this shape too, not just success ones.
 type apiError struct {

@@ -22,21 +22,23 @@ type Config struct {
 
 // Server is the gateway's HTTP handler.
 type Server struct {
-	cfg Config
-	mux *http.ServeMux
-	// health has a short overall timeout; llm has none because a completion
-	// legitimately takes as long as the model takes — cancellation comes from
-	// the client's request context instead.
-	health *http.Client
-	llm    *http.Client
+	cfg      Config
+	mux      *http.ServeMux
+	health   *http.Client
+	provider Provider
 }
 
 func New(cfg Config) *Server {
+	return NewWithProvider(cfg, NewOllamaProvider(cfg.OllamaURL))
+}
+
+// NewWithProvider lets tests (and later, the router) inject the provider.
+func NewWithProvider(cfg Config, p Provider) *Server {
 	s := &Server{
-		cfg:    cfg,
-		mux:    http.NewServeMux(),
-		health: &http.Client{Timeout: 5 * time.Second},
-		llm:    &http.Client{},
+		cfg:      cfg,
+		mux:      http.NewServeMux(),
+		health:   &http.Client{Timeout: 5 * time.Second},
+		provider: p,
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletions)
