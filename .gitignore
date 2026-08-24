@@ -1,0 +1,19 @@
+# binaries
+/bin/
+*.exe
+
+# go
+*.test
+*.out
+/vendor/
+
+# editors
+.idea/
+.vscode/
+*.swp
+
+# os
+.DS_Store
+
+# local env
+.env
