@@ -22,18 +22,24 @@ type Config struct {
 
 // Server is the gateway's HTTP handler.
 type Server struct {
-	cfg  Config
-	mux  *http.ServeMux
-	http *http.Client
+	cfg Config
+	mux *http.ServeMux
+	// health has a short overall timeout; llm has none because a completion
+	// legitimately takes as long as the model takes — cancellation comes from
+	// the client's request context instead.
+	health *http.Client
+	llm    *http.Client
 }
 
 func New(cfg Config) *Server {
 	s := &Server{
-		cfg:  cfg,
-		mux:  http.NewServeMux(),
-		http: &http.Client{Timeout: 5 * time.Second},
+		cfg:    cfg,
+		mux:    http.NewServeMux(),
+		health: &http.Client{Timeout: 5 * time.Second},
+		llm:    &http.Client{},
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletions)
 	return s
 }
 
@@ -53,7 +59,7 @@ type healthStatus struct {
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	st := healthStatus{Status: "ok", Ollama: "ok", Postgres: "ok"}
 
-	resp, err := s.http.Get(s.cfg.OllamaURL + "/api/version")
+	resp, err := s.health.Get(s.cfg.OllamaURL + "/api/version")
 	if err != nil {
 		st.Ollama = "unreachable: " + err.Error()
 	} else {
