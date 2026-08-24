@@ -41,7 +41,7 @@ go run ./cmd/gateway
 Check everything is wired:
 
 ```sh
-curl -s localhost:8080/healthz
+curl -s localhost:8090/healthz
 # {"status":"ok","ollama":"ok","postgres":"ok"}
 ```
 

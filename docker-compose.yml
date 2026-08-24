@@ -14,7 +14,8 @@ services:
   postgres:
     image: postgres:16-alpine
     ports:
-      - "5432:5432"
+      # 5433 on the host: exchange's postgres already owns 5432 locally
+      - "5433:5432"
     environment:
       POSTGRES_USER: scope
       POSTGRES_PASSWORD: scope
