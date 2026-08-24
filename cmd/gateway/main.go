@@ -12,7 +12,7 @@ func main() {
 	cfg := gateway.Config{
 		Addr:         envOr("SCOPE_ADDR", ":8080"),
 		OllamaURL:    envOr("SCOPE_OLLAMA_URL", "http://localhost:11434"),
-		PostgresAddr: envOr("SCOPE_POSTGRES_ADDR", "localhost:5432"),
+		PostgresAddr: envOr("SCOPE_POSTGRES_ADDR", "localhost:5433"),
 	}
 
 	srv := gateway.New(cfg)
