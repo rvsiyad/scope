@@ -1,0 +1,32 @@
+services:
+  ollama:
+    image: ollama/ollama:0.11.10
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "ls"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: scope
+      POSTGRES_PASSWORD: scope
+      POSTGRES_DB: scope
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scope"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  ollama-models:
+  postgres-data:
