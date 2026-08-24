@@ -1,5 +1,7 @@
 # scope
 
+[![ci](https://github.com/rvsiyad/scope/actions/workflows/ci.yml/badge.svg)](https://github.com/rvsiyad/scope/actions/workflows/ci.yml)
+
 An OpenAI-compatible LLM gateway with an observability stack built from scratch —
 write-ahead log, Gorilla-compressed time-series storage, trace store, and a
 PromQL-lite query engine. No Prometheus, no ClickHouse: the engine is the point.
