@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ func main() {
 	}
 
 	srv := gateway.New(cfg)
+	srv.Start(context.Background())
 	log.Printf("gateway listening on %s (ollama=%s postgres=%s)", cfg.Addr, cfg.OllamaURL, cfg.PostgresAddr)
 	if err := http.ListenAndServe(cfg.Addr, srv); err != nil {
 		log.Fatal(err)
