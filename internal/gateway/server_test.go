@@ -21,7 +21,7 @@ func TestHealthzAllDependenciesUp(t *testing.T) {
 	}
 	defer pg.Close()
 
-	srv := New(Config{OllamaURL: ollama.URL, PostgresAddr: pg.Addr().String()})
+	srv := New(Config{OllamaURLs: []string{ollama.URL}, PostgresAddr: pg.Addr().String()})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
 
@@ -45,7 +45,7 @@ func TestHealthzDegradedWhenOllamaDown(t *testing.T) {
 	defer pg.Close()
 
 	// Port 1 is reserved and unbound: connection refused immediately.
-	srv := New(Config{OllamaURL: "http://127.0.0.1:1", PostgresAddr: pg.Addr().String()})
+	srv := New(Config{OllamaURLs: []string{"http://127.0.0.1:1"}, PostgresAddr: pg.Addr().String()})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
 

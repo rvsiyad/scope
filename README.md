@@ -10,7 +10,8 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 1 — streaming proxy working end to end (Ollama provider).
+Status: session 2 — streaming proxy with hand-rolled circuit breakers and
+provider failover; recovery detected by active health probes.
 
 ## Use it like OpenAI
 
@@ -65,8 +66,36 @@ Check everything is wired:
 
 ```sh
 curl -s localhost:8090/healthz
-# {"status":"ok","ollama":"ok","postgres":"ok"}
+# {"status":"ok","ollama":"ok","postgres":"ok","providers":[{"name":"ollama","breaker":"closed"}]}
 ```
+
+## Failover demo
+
+Every provider sits behind its own circuit breaker (closed → open → half-open,
+built by hand — see `internal/gateway/breaker.go`). Requests go to the first
+provider whose breaker admits them; an open breaker is skipped without spending
+a call, and a background probe closes it again once the provider recovers.
+
+Run the gateway with a two-instance chain and kill the primary mid-traffic:
+
+```sh
+SCOPE_OLLAMA_URLS=http://localhost:11434,http://localhost:11435 go run ./cmd/gateway
+```
+
+```sh
+python3 examples/failover_demo.py
+```
+
+```sh
+docker compose stop ollama   # requests reroute to ollama-2; breaker: ollama-1=open
+```
+
+```sh
+docker compose start ollama  # probe closes the breaker; traffic returns
+```
+
+Streams fail over only before the first byte — once chunks have reached the
+client, a replay would duplicate content, so mid-stream failures surface as-is.
 
 ## Test
 

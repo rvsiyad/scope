@@ -11,6 +11,21 @@ services:
       timeout: 3s
       retries: 5
 
+  # Failover target for the demo: a second Ollama sharing the model volume
+  # (blobs are content-addressed, so concurrent readers are safe — pull a
+  # model through either instance and both serve it).
+  ollama-backup:
+    image: ollama/ollama:0.11.10
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "ls"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   postgres:
     image: postgres:16-alpine
     ports:

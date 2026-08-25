@@ -50,7 +50,7 @@ func TestChatCompletionTranslatesBothWays(t *testing.T) {
 		})
 	})
 
-	srv := New(Config{OllamaURL: ollama.URL})
+	srv := New(Config{OllamaURLs: []string{ollama.URL}})
 	rec := postChat(t, srv, `{
 		"model": "llama3.2:1b",
 		"messages": [{"role":"user","content":"hello"}],
@@ -94,7 +94,7 @@ func TestChatCompletionTranslatesBothWays(t *testing.T) {
 }
 
 func TestChatCompletionValidation(t *testing.T) {
-	srv := New(Config{OllamaURL: "http://127.0.0.1:1"})
+	srv := New(Config{OllamaURLs: []string{"http://127.0.0.1:1"}})
 	cases := []struct {
 		name, body string
 		wantStatus int
@@ -120,7 +120,7 @@ func TestChatCompletionValidation(t *testing.T) {
 func TestChatCompletionProviderDown(t *testing.T) {
 	// With the whole (single-provider) failover chain down, the gateway owns
 	// the outage: 503, not a relayed 502.
-	srv := New(Config{OllamaURL: "http://127.0.0.1:1"})
+	srv := New(Config{OllamaURLs: []string{"http://127.0.0.1:1"}})
 	rec := postChat(t, srv, `{"model":"m","messages":[{"role":"user","content":"x"}]}`)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)

@@ -123,7 +123,7 @@ func TestHealthzReportsBreakerStates(t *testing.T) {
 	r := NewRouter(BreakerConfig{FailureThreshold: 1, OpenTimeout: time.Minute}, p)
 	trip(t, r, p)
 
-	srv := NewWithProvider(Config{OllamaURL: "http://127.0.0.1:1", PostgresAddr: "127.0.0.1:1"}, r)
+	srv := NewWithProvider(Config{OllamaURLs: []string{"http://127.0.0.1:1"}, PostgresAddr: "127.0.0.1:1"}, r)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
 
