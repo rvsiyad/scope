@@ -29,6 +29,23 @@ func NewOllamaProvider(baseURL string) *OllamaProvider {
 
 func (p *OllamaProvider) Name() string { return "ollama" }
 
+// CheckHealth satisfies HealthChecker with Ollama's cheapest endpoint.
+func (p *OllamaProvider) CheckHealth(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/api/version", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := p.http.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama version endpoint returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
 type ollamaChatRequest struct {
 	Model    string         `json:"model"`
 	Messages []Message      `json:"messages"`

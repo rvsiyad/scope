@@ -4,6 +4,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -52,10 +53,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+// Start launches the server's background work (currently the recovery
+// probes) and returns immediately. ctx cancellation stops it.
+func (s *Server) Start(ctx context.Context) {
+	if router, ok := s.provider.(*Router); ok {
+		router.StartProbes(ctx, defaultProbeInterval)
+	}
+}
+
 type healthStatus struct {
-	Status   string `json:"status"`
-	Ollama   string `json:"ollama"`
-	Postgres string `json:"postgres"`
+	Status   string           `json:"status"`
+	Ollama   string           `json:"ollama"`
+	Postgres string           `json:"postgres"`
+	Provider []ProviderStatus `json:"providers,omitempty"`
 }
 
 // handleHealthz reports the gateway's own liveness plus reachability of its
@@ -63,6 +73,9 @@ type healthStatus struct {
 // exactly which piece of the stack is missing.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	st := healthStatus{Status: "ok", Ollama: "ok", Postgres: "ok"}
+	if router, ok := s.provider.(*Router); ok {
+		st.Provider = router.Status()
+	}
 
 	resp, err := s.health.Get(s.cfg.OllamaURL + "/api/version")
 	if err != nil {
