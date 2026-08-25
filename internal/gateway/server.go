@@ -6,6 +6,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -14,8 +15,9 @@ import (
 type Config struct {
 	// Addr is the listen address, e.g. ":8080".
 	Addr string
-	// OllamaURL is the base URL of the Ollama server, e.g. "http://localhost:11434".
-	OllamaURL string
+	// OllamaURLs is the failover chain, tried in order: first entry is the
+	// primary, e.g. ["http://localhost:11434", "http://localhost:11435"].
+	OllamaURLs []string
 	// PostgresAddr is the host:port of Postgres, health-checked over TCP only
 	// until the gateway actually stores tenants there.
 	PostgresAddr string
@@ -32,8 +34,15 @@ type Server struct {
 func New(cfg Config) *Server {
 	// Even a single provider goes through the router: its breaker turns a
 	// dead upstream into fast 503s instead of a pile-up of hung requests.
-	router := NewRouter(DefaultBreakerConfig(), NewOllamaProvider(cfg.OllamaURL))
-	return NewWithProvider(cfg, router)
+	providers := make([]Provider, 0, len(cfg.OllamaURLs))
+	for i, url := range cfg.OllamaURLs {
+		name := "ollama"
+		if len(cfg.OllamaURLs) > 1 {
+			name = fmt.Sprintf("ollama-%d", i+1)
+		}
+		providers = append(providers, NewNamedOllamaProvider(name, url))
+	}
+	return NewWithProvider(cfg, NewRouter(DefaultBreakerConfig(), providers...))
 }
 
 // NewWithProvider lets tests (and later, the router) inject the provider.
@@ -77,11 +86,13 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		st.Provider = router.Status()
 	}
 
-	resp, err := s.health.Get(s.cfg.OllamaURL + "/api/version")
-	if err != nil {
-		st.Ollama = "unreachable: " + err.Error()
-	} else {
-		resp.Body.Close()
+	if len(s.cfg.OllamaURLs) > 0 {
+		resp, err := s.health.Get(s.cfg.OllamaURLs[0] + "/api/version")
+		if err != nil {
+			st.Ollama = "unreachable: " + err.Error()
+		} else {
+			resp.Body.Close()
+		}
 	}
 
 	conn, err := net.DialTimeout("tcp", s.cfg.PostgresAddr, 2*time.Second)

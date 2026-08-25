@@ -17,6 +17,7 @@ import (
 // OpenAI-compat endpoint: the translation layer is the point — it is exactly
 // what the Anthropic adapter will need for real.
 type OllamaProvider struct {
+	name    string
 	baseURL string
 	// No overall timeout: a completion legitimately takes as long as the
 	// model takes. Cancellation comes from the request context.
@@ -24,10 +25,16 @@ type OllamaProvider struct {
 }
 
 func NewOllamaProvider(baseURL string) *OllamaProvider {
-	return &OllamaProvider{baseURL: baseURL, http: &http.Client{}}
+	return NewNamedOllamaProvider("ollama", baseURL)
 }
 
-func (p *OllamaProvider) Name() string { return "ollama" }
+// NewNamedOllamaProvider distinguishes multiple Ollama instances in a
+// failover chain ("ollama-1", "ollama-2") in logs and /healthz.
+func NewNamedOllamaProvider(name, baseURL string) *OllamaProvider {
+	return &OllamaProvider{name: name, baseURL: baseURL, http: &http.Client{}}
+}
+
+func (p *OllamaProvider) Name() string { return p.name }
 
 // CheckHealth satisfies HealthChecker with Ollama's cheapest endpoint.
 func (p *OllamaProvider) CheckHealth(ctx context.Context) error {
