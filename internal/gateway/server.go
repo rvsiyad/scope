@@ -29,7 +29,10 @@ type Server struct {
 }
 
 func New(cfg Config) *Server {
-	return NewWithProvider(cfg, NewOllamaProvider(cfg.OllamaURL))
+	// Even a single provider goes through the router: its breaker turns a
+	// dead upstream into fast 503s instead of a pile-up of hung requests.
+	router := NewRouter(DefaultBreakerConfig(), NewOllamaProvider(cfg.OllamaURL))
+	return NewWithProvider(cfg, router)
 }
 
 // NewWithProvider lets tests (and later, the router) inject the provider.
