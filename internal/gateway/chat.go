@@ -33,7 +33,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.provider.Chat(r.Context(), req)
 	if err != nil {
 		log.Printf("provider %s error: %v", s.provider.Name(), err)
-		writeAPIError(w, http.StatusBadGateway, "api_error", "upstream provider error")
+		writeProviderError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -47,7 +47,7 @@ func (s *Server) streamChat(w http.ResponseWriter, r *http.Request, req ChatRequ
 	stream, err := s.provider.ChatStream(r.Context(), req)
 	if err != nil {
 		log.Printf("provider %s error: %v", s.provider.Name(), err)
-		writeAPIError(w, http.StatusBadGateway, "api_error", "upstream provider error")
+		writeProviderError(w, err)
 		return
 	}
 	defer stream.Close()
@@ -117,6 +117,17 @@ func (s *Server) streamChat(w http.ResponseWriter, r *http.Request, req ChatRequ
 
 	io.WriteString(w, "data: [DONE]\n\n")
 	flusher.Flush()
+}
+
+// writeProviderError distinguishes "every provider is down or circuit-broken"
+// (503 — our capacity problem, safe to retry elsewhere/later) from a single
+// upstream call failing (502).
+func writeProviderError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrNoHealthyProvider) {
+		writeAPIError(w, http.StatusServiceUnavailable, "api_error", "no healthy upstream provider")
+		return
+	}
+	writeAPIError(w, http.StatusBadGateway, "api_error", "upstream provider error")
 }
 
 func writeSSE(w io.Writer, event any) error {
