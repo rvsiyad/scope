@@ -3,8 +3,10 @@ package gateway
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // TenantConfig declares one tenant: who they are, the API key that
@@ -50,10 +52,16 @@ func ParseTenants(spec string) ([]TenantConfig, error) {
 	return out, nil
 }
 
-// tenant is the runtime state behind one API key.
+// tenant is the runtime state behind one API key. The counters are the
+// admission story per tenant: how many requests got in, how many were turned
+// away, and what the admitted ones actually cost once settled.
 type tenant struct {
 	name   string
 	budget *TenantBudget
+
+	admitted      atomic.Uint64
+	rejected      atomic.Uint64
+	tokensCharged atomic.Uint64
 }
 
 func buildTenants(configs []TenantConfig) map[string]*tenant {
@@ -64,6 +72,40 @@ func buildTenants(configs []TenantConfig) map[string]*tenant {
 	for _, c := range configs {
 		out[c.APIKey] = &tenant{name: c.Name, budget: NewTenantBudget(c.TokensPerMinute)}
 	}
+	return out
+}
+
+// TenantStatus is one tenant's admission picture as reported by /healthz:
+// the live budget balance plus the counters. Until the self-built metrics
+// backend lands (phase B), this is the gateway's admission dashboard.
+type TenantStatus struct {
+	Name string `json:"name"`
+	// Available is the current balance; negative means the tenant is in
+	// debt from a stream that overran its estimate.
+	Available     int    `json:"available_tokens"`
+	Capacity      int    `json:"capacity_tokens"`
+	Admitted      uint64 `json:"admitted"`
+	Rejected      uint64 `json:"rejected"`
+	TokensCharged uint64 `json:"tokens_charged"`
+}
+
+func (s *Server) tenantStatus() []TenantStatus {
+	if len(s.tenants) == 0 {
+		return nil
+	}
+	out := make([]TenantStatus, 0, len(s.tenants))
+	for _, t := range s.tenants {
+		out = append(out, TenantStatus{
+			Name:          t.name,
+			Available:     t.budget.Available(),
+			Capacity:      t.budget.Capacity(),
+			Admitted:      t.admitted.Load(),
+			Rejected:      t.rejected.Load(),
+			TokensCharged: t.tokensCharged.Load(),
+		})
+	}
+	// The map's iteration order would make healthz flap between calls.
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

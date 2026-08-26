@@ -15,6 +15,10 @@ func fakeOllama(t *testing.T, respond func(w http.ResponseWriter, req ollamaChat
 	t.Helper()
 	captured := &ollamaChatRequest{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/version" { // healthz's liveness probe
+			w.Write([]byte(`{"version":"0.0.0"}`))
+			return
+		}
 		if r.URL.Path != "/api/chat" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 			http.NotFound(w, r)
