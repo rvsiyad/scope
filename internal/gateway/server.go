@@ -24,7 +24,17 @@ type Config struct {
 	// Tenants are the API keys and token budgets the gateway enforces.
 	// Empty means open mode: no auth, no rate limiting.
 	Tenants []TenantConfig
+	// CacheEntries and CacheTTL bound the response cache; zero values take
+	// the defaults below. The cache has no off switch because it only ever
+	// applies to requests that pinned temperature to 0 (see Cacheable).
+	CacheEntries int
+	CacheTTL     time.Duration
 }
+
+const (
+	defaultCacheEntries = 1024
+	defaultCacheTTL     = 5 * time.Minute
+)
 
 // Server is the gateway's HTTP handler.
 type Server struct {
@@ -32,6 +42,7 @@ type Server struct {
 	mux      *http.ServeMux
 	health   *http.Client
 	provider Provider
+	cache    *ResponseCache
 	// tenants maps API key -> tenant state; nil in open mode.
 	tenants map[string]*tenant
 }
@@ -52,11 +63,18 @@ func New(cfg Config) *Server {
 
 // NewWithProvider lets tests (and later, the router) inject the provider.
 func NewWithProvider(cfg Config, p Provider) *Server {
+	if cfg.CacheEntries == 0 {
+		cfg.CacheEntries = defaultCacheEntries
+	}
+	if cfg.CacheTTL == 0 {
+		cfg.CacheTTL = defaultCacheTTL
+	}
 	s := &Server{
 		cfg:      cfg,
 		mux:      http.NewServeMux(),
 		health:   &http.Client{Timeout: 5 * time.Second},
 		provider: p,
+		cache:    NewResponseCache(cfg.CacheEntries, cfg.CacheTTL),
 		tenants:  buildTenants(cfg.Tenants),
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
@@ -82,6 +100,7 @@ type healthStatus struct {
 	Postgres string           `json:"postgres"`
 	Provider []ProviderStatus `json:"providers,omitempty"`
 	Budgets  []TenantStatus   `json:"budgets,omitempty"`
+	Cache    *CacheStatus     `json:"cache,omitempty"`
 }
 
 // handleHealthz reports the gateway's own liveness plus reachability of its
@@ -93,6 +112,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		st.Provider = router.Status()
 	}
 	st.Budgets = s.tenantStatus()
+	st.Cache = s.cache.Status()
 
 	if len(s.cfg.OllamaURLs) > 0 {
 		resp, err := s.health.Get(s.cfg.OllamaURLs[0] + "/api/version")

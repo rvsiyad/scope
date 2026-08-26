@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -32,13 +33,30 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cache lookup sits after auth (the key needs the tenant) but before
+	// admission, and a hit is free: budgets exist because provider tokens
+	// cost money, and a hit consumes zero of them. Charging for a hit would
+	// bill the tenant for nothing; 429ing one would refuse a response that
+	// costs nothing to serve.
+	if Cacheable(req) {
+		if cached, ok := s.cache.Get(tenantName(tenant), req); ok {
+			if req.Stream {
+				s.replayCachedStream(w, req, cached)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
+	}
+
 	res, ok := s.admit(w, tenant, req)
 	if !ok {
 		return
 	}
 
 	if req.Stream {
-		s.streamChat(w, r, req, res)
+		s.streamChat(w, r, tenantName(tenant), req, res)
 		return
 	}
 
@@ -50,6 +68,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res.Settle(actualTokens(resp, req))
+	s.cache.Put(tenantName(tenant), req, resp)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
@@ -100,7 +119,9 @@ func actualTokens(resp ChatResponse, req ChatRequest) int {
 // streamChat relays a provider stream to the client as SSE. The invariant
 // that makes the gateway a real streaming proxy: every chunk is written AND
 // flushed before the next Recv — nothing above one chunk is ever buffered.
-func (s *Server) streamChat(w http.ResponseWriter, r *http.Request, req ChatRequest, res *Reservation) {
+// (The cache-fill accumulator below is a copy of what already streamed, not
+// a buffer between provider and client.)
+func (s *Server) streamChat(w http.ResponseWriter, r *http.Request, cacheTenant string, req ChatRequest, res *Reservation) {
 	stream, err := s.provider.ChatStream(r.Context(), req)
 	if err != nil {
 		res.Settle(0) // stream never started; full refund
@@ -147,6 +168,13 @@ func (s *Server) streamChat(w http.ResponseWriter, r *http.Request, req ChatRequ
 	created := time.Now().Unix()
 	first := true
 
+	// A stream is cache-fillable only once it ends cleanly (finish reason
+	// seen, EOF reached): caching a half-delivered completion would replay
+	// the truncation to every later hit.
+	fill := Cacheable(req)
+	var content strings.Builder
+	finishReason, model := "", req.Model
+
 	for {
 		chunk, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -161,6 +189,15 @@ func (s *Server) streamChat(w http.ResponseWriter, r *http.Request, req ChatRequ
 		meteredChars += len(chunk.Content)
 		if chunk.Usage != nil {
 			usage = chunk.Usage
+		}
+		if fill {
+			content.WriteString(chunk.Content)
+			if chunk.FinishReason != "" {
+				finishReason = chunk.FinishReason
+			}
+			if chunk.Model != "" {
+				model = chunk.Model
+			}
 		}
 
 		event := ChatChunkResponse{
@@ -191,6 +228,64 @@ func (s *Server) streamChat(w http.ResponseWriter, r *http.Request, req ChatRequ
 		flusher.Flush()
 	}
 
+	if fill && finishReason != "" {
+		s.cache.Put(cacheTenant, req, ChatResponse{
+			ID:      id,
+			Object:  "chat.completion",
+			Created: created,
+			Model:   model,
+			Choices: []Choice{{
+				Message:      Message{Role: "assistant", Content: content.String()},
+				FinishReason: finishReason,
+			}},
+			Usage: usage,
+		})
+	}
+
+	io.WriteString(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+// replayCachedStream serves a cache hit to a client that asked for SSE. The
+// completion already exists in full — there is no provider TTFT to hide —
+// so it replays as a minimal, well-formed stream: one chunk carrying the
+// whole message and the finish reason, then [DONE].
+func (s *Server) replayCachedStream(w http.ResponseWriter, req ChatRequest, resp ChatResponse) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeAPIError(w, http.StatusInternalServerError, "api_error", "streaming unsupported by server")
+		return
+	}
+	if len(resp.Choices) == 0 {
+		writeAPIError(w, http.StatusInternalServerError, "api_error", "cached response has no choices")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+
+	choice := resp.Choices[0]
+	fr := choice.FinishReason
+	if fr == "" {
+		fr = "stop"
+	}
+	event := ChatChunkResponse{
+		ID:      resp.ID,
+		Object:  "chat.completion.chunk",
+		Created: resp.Created,
+		Model:   resp.Model,
+		Choices: []ChunkChoice{{
+			Delta:        Delta{Role: "assistant", Content: choice.Message.Content},
+			FinishReason: &fr,
+		}},
+	}
+	if event.Model == "" {
+		event.Model = req.Model
+	}
+	if err := writeSSE(w, event); err != nil {
+		return
+	}
 	io.WriteString(w, "data: [DONE]\n\n")
 	flusher.Flush()
 }
