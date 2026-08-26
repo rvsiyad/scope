@@ -17,3 +17,6 @@
 
 # local env
 .env
+
+# collector WAL and future store files
+/data/
