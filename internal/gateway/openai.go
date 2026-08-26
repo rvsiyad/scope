@@ -81,9 +81,13 @@ type apiErrorBody struct {
 }
 
 func writeAPIError(w http.ResponseWriter, status int, errType, msg string) {
+	writeAPIErrorCode(w, status, errType, "", msg)
+}
+
+func writeAPIErrorCode(w http.ResponseWriter, status int, errType, code, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(apiError{Error: apiErrorBody{Message: msg, Type: errType}})
+	json.NewEncoder(w).Encode(apiError{Error: apiErrorBody{Message: msg, Type: errType, Code: code}})
 }
 
 // newCompletionID mimics OpenAI's "chatcmpl-..." ids.
