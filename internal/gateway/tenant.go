@@ -109,6 +109,15 @@ func (s *Server) tenantStatus() []TenantStatus {
 	return out
 }
 
+// tenantName names a tenant for cache keying; open mode's anonymous tenant
+// is the empty name, giving all anonymous traffic one shared cache scope.
+func tenantName(t *tenant) string {
+	if t == nil {
+		return ""
+	}
+	return t.name
+}
+
 // authTenant resolves the request's tenant from its Bearer key, writing the
 // 401 itself on failure. With no tenants configured the gateway runs open
 // and every request is anonymous (nil tenant, nothing rate limited);
