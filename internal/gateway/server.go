@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/rvsiyad/scope/internal/telemetry"
 )
 
 type Config struct {
@@ -29,6 +31,14 @@ type Config struct {
 	// applies to requests that pinned temperature to 0 (see Cacheable).
 	CacheEntries int
 	CacheTTL     time.Duration
+	// CollectorURL is the telemetry backend's ingest endpoint. Empty means
+	// no telemetry: the gateway runs with a nil emitter and every Record*
+	// call is a no-op.
+	CollectorURL string
+	// PricePerMTokens converts settled tokens to dollars in telemetry (USD
+	// per million tokens). Zero for the Ollama demo — local models are
+	// free; set it to see the cache's savings in currency.
+	PricePerMTokens float64
 }
 
 const (
@@ -43,6 +53,9 @@ type Server struct {
 	health   *http.Client
 	provider Provider
 	cache    *ResponseCache
+	// emitter ships spans and metrics to the collector; nil when no
+	// collector is configured (Record* on nil is a no-op by design).
+	emitter *telemetry.Emitter
 	// tenants maps API key -> tenant state; nil in open mode.
 	tenants map[string]*tenant
 }
@@ -77,6 +90,9 @@ func NewWithProvider(cfg Config, p Provider) *Server {
 		cache:    NewResponseCache(cfg.CacheEntries, cfg.CacheTTL),
 		tenants:  buildTenants(cfg.Tenants),
 	}
+	if cfg.CollectorURL != "" {
+		s.emitter = telemetry.NewEmitter(telemetry.Config{CollectorURL: cfg.CollectorURL})
+	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletions)
 	return s
@@ -86,12 +102,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// Start launches the server's background work (currently the recovery
-// probes) and returns immediately. ctx cancellation stops it.
+// Start launches the server's background work (recovery probes, telemetry
+// flushing) and returns immediately. ctx cancellation stops it.
 func (s *Server) Start(ctx context.Context) {
 	if router, ok := s.provider.(*Router); ok {
 		router.StartProbes(ctx, defaultProbeInterval)
 	}
+	s.emitter.Start(ctx)
 }
 
 type healthStatus struct {
@@ -101,6 +118,8 @@ type healthStatus struct {
 	Provider []ProviderStatus `json:"providers,omitempty"`
 	Budgets  []TenantStatus   `json:"budgets,omitempty"`
 	Cache    *CacheStatus     `json:"cache,omitempty"`
+
+	Telemetry *telemetry.EmitterStatus `json:"telemetry,omitempty"`
 }
 
 // handleHealthz reports the gateway's own liveness plus reachability of its
@@ -113,6 +132,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 	st.Budgets = s.tenantStatus()
 	st.Cache = s.cache.Status()
+	st.Telemetry = s.emitter.Status()
 
 	if len(s.cfg.OllamaURLs) > 0 {
 		resp, err := s.health.Get(s.cfg.OllamaURLs[0] + "/api/version")

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/rvsiyad/scope/internal/gateway"
@@ -17,12 +18,22 @@ func main() {
 		log.Fatalf("SCOPE_TENANTS: %v", err)
 	}
 
+	// USD per million tokens for telemetry cost attribution; 0 (the
+	// default) is honest for local Ollama.
+	price, err := strconv.ParseFloat(envOr("SCOPE_PRICE_PER_M_TOKENS", "0"), 64)
+	if err != nil || price < 0 {
+		log.Fatalf("SCOPE_PRICE_PER_M_TOKENS: %q is not a non-negative number", os.Getenv("SCOPE_PRICE_PER_M_TOKENS"))
+	}
+
 	cfg := gateway.Config{
 		Addr: envOr("SCOPE_ADDR", ":8090"),
 		// Comma-separated failover chain; first entry is the primary.
 		OllamaURLs:   strings.Split(envOr("SCOPE_OLLAMA_URLS", "http://localhost:11434"), ","),
 		PostgresAddr: envOr("SCOPE_POSTGRES_ADDR", "localhost:5433"),
 		Tenants:      tenants,
+		// Empty means no telemetry; the collector's default addr is :8091.
+		CollectorURL:    os.Getenv("SCOPE_COLLECTOR_URL"),
+		PricePerMTokens: price,
 	}
 
 	srv := gateway.New(cfg)
