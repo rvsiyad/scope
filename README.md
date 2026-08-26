@@ -10,11 +10,12 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 5 (phase B underway) — the gateway (streaming proxy,
+Status: session 6 (phase B underway) — the gateway (streaming proxy,
 hand-rolled circuit breakers, failover, token-budget rate limiting,
-response cache, telemetry emission) is complete, and the backend has its
-durability spine: a from-scratch write-ahead log with torn-write recovery
-behind the collector's ingest API.
+response cache, telemetry emission) is complete; the backend has its
+durability spine (from-scratch WAL with torn-write recovery) and its
+compression engine (the Gorilla paper's delta-of-delta + XOR codec,
+measured at 3.07 bytes/sample on real gateway telemetry vs 16 raw).
 
 ## Use it like OpenAI
 
@@ -48,6 +49,7 @@ curl -N localhost:8090/v1/chat/completions -d '{
 | `internal/telemetry` | span/metric model, wire format, batching fire-and-forget emitter |
 | `internal/collector` | ingest API: validate → WAL → ack; handoff to the stores |
 | `internal/wal` | append-only log, CRC records, torn-write recovery, fsync policies |
+| `internal/gorilla` | the paper's codec: delta-of-delta timestamps, XOR values |
 | `docs/` | learning log, ADRs |
 
 Later phases add `tsdb` (the storage engine), `tracestore`, `query`, and `ui`.
@@ -207,6 +209,35 @@ it on the same log, and checks every acknowledged batch replayed — in a live
 run, 118/118 acks survived plus one in-flight batch that was appended but
 killed before its 204 left the socket, which is exactly the semantics the
 ack promises.
+
+## Gorilla compression
+
+`internal/gorilla` implements the two tricks from Facebook's Gorilla paper
+(Pelkonen et al., VLDB 2015) that make in-memory TSDBs affordable:
+timestamps stored as **delta-of-delta** (a regular scrape clock costs one
+bit per sample) and float values as **XOR against their predecessor** with
+sticky leading/trailing-zero windows (an unchanged value costs one bit;
+similar values pay only for their differing mantissa bits). The codec is
+standalone and property-tested — NaN, infinities, denormals, and negative
+zero round-trip bit-exactly, and hostile input may compress badly but must
+never decode wrongly.
+
+Measured on this repo's own telemetry (a live gateway run replayed from the
+collector WAL — `go run ./cmd/compressbench -wal <path>`):
+
+| series | samples | bytes/sample | vs 16 raw |
+|---|---|---|---|
+| `gateway_requests_total{cache="hit",...}` | 600 | 0.95 | 16.9x |
+| `gateway_tokens_total` | 623 | 1.01 | 15.8x |
+| `gateway_cost_usd` | 623 | 1.12 | 14.3x |
+| `gateway_request_duration_ms` | 623 | 8.92 | 1.8x |
+| **total (all series)** | **2515** | **3.07** | **5.2x** |
+
+The spread is the honest story: counter-shaped series land right at the
+paper's fleet-wide 1.37, while continuous millisecond durations churn the
+full mantissa every sample and settle for ~2x. `compressbench` re-decodes
+every block and compares bit patterns before reporting — a compression
+number from a codec that can't round-trip would be worse than no number.
 
 ## Test
 
