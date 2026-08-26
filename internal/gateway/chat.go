@@ -65,8 +65,11 @@ func (s *Server) admit(w http.ResponseWriter, t *tenant, req ChatRequest) (*Rese
 	}
 	res, err := t.budget.Reserve(estimateTokens(req))
 	if err == nil {
+		t.admitted.Add(1)
+		res.onSettle = func(actual int) { t.tokensCharged.Add(uint64(actual)) }
 		return res, true
 	}
+	t.rejected.Add(1)
 	var exhausted *BudgetExhaustedError
 	if errors.As(err, &exhausted) {
 		secs := int(exhausted.RetryAfter.Seconds())

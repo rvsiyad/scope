@@ -81,6 +81,7 @@ type healthStatus struct {
 	Ollama   string           `json:"ollama"`
 	Postgres string           `json:"postgres"`
 	Provider []ProviderStatus `json:"providers,omitempty"`
+	Budgets  []TenantStatus   `json:"budgets,omitempty"`
 }
 
 // handleHealthz reports the gateway's own liveness plus reachability of its
@@ -91,6 +92,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if router, ok := s.provider.(*Router); ok {
 		st.Provider = router.Status()
 	}
+	st.Budgets = s.tenantStatus()
 
 	if len(s.cfg.OllamaURLs) > 0 {
 		resp, err := s.health.Get(s.cfg.OllamaURLs[0] + "/api/version")

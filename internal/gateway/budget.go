@@ -119,6 +119,10 @@ type Reservation struct {
 	budget   *TenantBudget
 	estimate int
 	once     sync.Once
+	// onSettle, when set, observes the actual cost the reservation settled
+	// at (fires exactly once) — the hook admission metrics hang off without
+	// the budget knowing about them.
+	onSettle func(actual int)
 }
 
 // Settle reports the request's actual token cost and adjusts the bucket by
@@ -134,8 +138,11 @@ func (r *Reservation) Settle(actual int) {
 	r.once.Do(func() {
 		b := r.budget
 		b.mu.Lock()
-		defer b.mu.Unlock()
 		b.refill()
 		b.available = math.Min(b.capacity, b.available+float64(r.estimate-actual))
+		b.mu.Unlock()
+		if r.onSettle != nil {
+			r.onSettle(actual)
+		}
 	})
 }
