@@ -10,9 +10,10 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 3 — streaming proxy with hand-rolled circuit breakers,
-provider failover, and multi-tenant token-budget rate limiting
-(estimate → reserve → settle).
+Status: session 4 (phase A complete) — streaming proxy with hand-rolled
+circuit breakers, provider failover, multi-tenant token-budget rate limiting
+(estimate → reserve → settle), exact-match response caching, and telemetry
+emission (span trees + metrics) into the collector.
 
 ## Use it like OpenAI
 
@@ -41,12 +42,13 @@ curl -N localhost:8090/v1/chat/completions -d '{
 
 | Path | What lives there |
 |---|---|
-| `cmd/gateway` | gateway entrypoint |
-| `internal/gateway` | OpenAI-compatible API, provider adapters, breakers, cache, rate limiter |
+| `cmd/gateway`, `cmd/collector` | entrypoints |
+| `internal/gateway` | OpenAI-compatible API, provider adapters, breakers, cache, rate limiter, instrumentation |
+| `internal/telemetry` | span/metric model, wire format, batching fire-and-forget emitter |
+| `internal/collector` | ingest API (stub today; the WAL and stores land here in phase B) |
 | `docs/` | learning log, ADRs |
 
-Later phases add `collector` (WAL ingest), `tsdb` (the storage engine),
-`tracestore`, `query`, and `ui`.
+Later phases add `tsdb` (the storage engine), `tracestore`, `query`, and `ui`.
 
 ## Run
 
@@ -129,6 +131,47 @@ python3 examples/budget_demo.py   # concurrent greedy clients vs one budget
 `/healthz` shows each tenant's live balance and admission counters; a
 rejected request never reaches the provider, and a client disconnect
 mid-stream still settles for the tokens that actually streamed.
+
+## Response cache
+
+Every hit is a provider call not made — measured, not implied: `/healthz`
+reports hits, misses, and tokens saved. Only requests pinned to
+`temperature: 0` are cached (at any higher temperature the provider is
+*supposed* to answer differently, and a memorized reply would silently
+change that); entries are keyed by a normalized hash of tenant + model +
+sampling params + messages, so tenants never share entries and equivalent
+requests always do. TTL bounds staleness, LRU bounds memory, and a cache hit
+bypasses the token budget entirely — it consumes zero provider tokens, so
+there is nothing honest to charge. A completion cached from a JSON request
+serves streaming clients too (replayed as SSE), and vice versa.
+
+## Telemetry
+
+Every request emits its whole story: a span tree (`request → auth → cache
+lookup → reserve → provider → settle`) where the provider span carries the
+TTFT marker and token counts, plus per-request metric samples
+(`gateway_requests_total`, `gateway_request_duration_ms`, `gateway_ttft_ms`,
+`gateway_tokens_total`, `gateway_cost_usd`). Emission is fire-and-forget by
+law: a non-blocking send onto a bounded buffer, batched to the collector in
+the background; when the collector is slow or down the gateway drops and
+*counts* — never blocks, never queues unboundedly (`internal/telemetry`).
+
+```sh
+go run ./cmd/collector    # ingest API on :9091 (stub — phase B grows the WAL here)
+```
+
+```sh
+SCOPE_COLLECTOR_URL=http://localhost:9091 SCOPE_PRICE_PER_M_TOKENS=400 go run ./cmd/gateway
+```
+
+```sh
+python3 examples/cache_telemetry_demo.py   # miss vs hit vs bypass, with receipts
+```
+
+The demo asks the same temperature-0 question twice (the second answer
+arrives ~1000x faster from cache), shows a default-temperature request
+correctly bypassing, and then reads both `/healthz` endpoints to prove every
+span and metric sample actually reached the collector.
 
 ## Test
 
