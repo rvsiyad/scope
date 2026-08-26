@@ -12,6 +12,18 @@ import (
 	"github.com/rvsiyad/scope/internal/telemetry"
 )
 
+// newTestServer builds a collector without a WAL — the validation and
+// counting tests don't need durability.
+func newTestServer(t *testing.T, consumers ...Consumer) *Server {
+	t.Helper()
+	srv, err := New(Config{}, consumers...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	return srv
+}
+
 func postIngest(t *testing.T, srv *Server, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -21,7 +33,7 @@ func postIngest(t *testing.T, srv *Server, body string) *httptest.ResponseRecord
 }
 
 func TestIngestCountsValidBatch(t *testing.T) {
-	srv := New()
+	srv := newTestServer(t)
 	batch := telemetry.Batch{
 		Spans: []telemetry.Span{{
 			TraceID: "aa", SpanID: "bb", Name: "request", Start: 1, End: 2,
@@ -47,7 +59,7 @@ func TestIngestCountsValidBatch(t *testing.T) {
 }
 
 func TestIngestRejectsGarbage(t *testing.T) {
-	srv := New()
+	srv := newTestServer(t)
 	cases := map[string]string{
 		"malformed JSON":  `{"spans": [`,
 		"span without id": `{"spans":[{"name":"request","start":1,"end":2}]}`,
@@ -72,7 +84,7 @@ func TestIngestRejectsGarbage(t *testing.T) {
 // End to end through the real emitter: what the gateway-side facade ships
 // is what the collector accepts — the two halves agree on the contract.
 func TestEmitterToCollectorContract(t *testing.T) {
-	srv := New()
+	srv := newTestServer(t)
 	httpSrv := httptest.NewServer(srv)
 	t.Cleanup(httpSrv.Close)
 
