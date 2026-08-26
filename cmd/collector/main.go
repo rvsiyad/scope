@@ -11,7 +11,10 @@ import (
 func main() {
 	addr := os.Getenv("SCOPE_COLLECTOR_ADDR")
 	if addr == "" {
-		addr = ":8091"
+		// 9091, not the gateway-adjacent 8091: the exchange stack co-tenant
+		// on this dev box owns 8091/8092/8095, and the collector is a
+		// metrics backend anyway — the 909x band is its natural home.
+		addr = ":9091"
 	}
 	srv := collector.New()
 	log.Printf("collector listening on %s", addr)
