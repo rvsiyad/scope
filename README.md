@@ -10,10 +10,11 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 4 (phase A complete) — streaming proxy with hand-rolled
-circuit breakers, provider failover, multi-tenant token-budget rate limiting
-(estimate → reserve → settle), exact-match response caching, and telemetry
-emission (span trees + metrics) into the collector.
+Status: session 5 (phase B underway) — the gateway (streaming proxy,
+hand-rolled circuit breakers, failover, token-budget rate limiting,
+response cache, telemetry emission) is complete, and the backend has its
+durability spine: a from-scratch write-ahead log with torn-write recovery
+behind the collector's ingest API.
 
 ## Use it like OpenAI
 
@@ -45,7 +46,8 @@ curl -N localhost:8090/v1/chat/completions -d '{
 | `cmd/gateway`, `cmd/collector` | entrypoints |
 | `internal/gateway` | OpenAI-compatible API, provider adapters, breakers, cache, rate limiter, instrumentation |
 | `internal/telemetry` | span/metric model, wire format, batching fire-and-forget emitter |
-| `internal/collector` | ingest API (stub today; the WAL and stores land here in phase B) |
+| `internal/collector` | ingest API: validate → WAL → ack; handoff to the stores |
+| `internal/wal` | append-only log, CRC records, torn-write recovery, fsync policies |
 | `docs/` | learning log, ADRs |
 
 Later phases add `tsdb` (the storage engine), `tracestore`, `query`, and `ui`.
@@ -172,6 +174,39 @@ The demo asks the same temperature-0 question twice (the second answer
 arrives ~1000x faster from cache), shows a default-temperature request
 correctly bypassing, and then reads both `/healthz` endpoints to prove every
 span and metric sample actually reached the collector.
+
+## Write-ahead log
+
+The collector's `204` is a durability promise, not a pleasantry: each batch
+is validated, appended to a write-ahead log (`internal/wal` — length-prefixed,
+CRC32C-checksummed records), and only then acknowledged. Recovery keeps the
+longest valid prefix: a torn final write (the crash case) is detected by
+checksum and truncated away, so a record either fully happened or never did.
+On restart the log replays into the stores through the `Consumer` handoff —
+which is why phase B's stores get to live purely in memory.
+
+When the ack happens is the durability/throughput dial (`SCOPE_WAL_SYNC`),
+and the gap is why the dial exists — measured on this repo's benchmark
+(`go test -bench=Append ./internal/wal/`, Apple M4, 1 KiB records):
+
+| policy | an ack survives | measured |
+|---|---|---|
+| `always` (default) | power loss | ~257 appends/s |
+| `interval` | process death now; power loss after ≤ one tick | ~617k appends/s |
+| `never` | process death (the page cache is the kernel's) | ~619k appends/s |
+
+Prove the contract with a real `kill -9` mid-ingest (self-contained — builds
+and manages its own collector):
+
+```sh
+python3 examples/crash_recovery_demo.py
+```
+
+The script counts acks, murders the process with no shutdown hook, restarts
+it on the same log, and checks every acknowledged batch replayed — in a live
+run, 118/118 acks survived plus one in-flight batch that was appended but
+killed before its 204 left the socket, which is exactly the semantics the
+ack promises.
 
 ## Test
 
