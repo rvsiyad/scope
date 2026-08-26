@@ -21,6 +21,9 @@ type Config struct {
 	// PostgresAddr is the host:port of Postgres, health-checked over TCP only
 	// until the gateway actually stores tenants there.
 	PostgresAddr string
+	// Tenants are the API keys and token budgets the gateway enforces.
+	// Empty means open mode: no auth, no rate limiting.
+	Tenants []TenantConfig
 }
 
 // Server is the gateway's HTTP handler.
@@ -29,6 +32,8 @@ type Server struct {
 	mux      *http.ServeMux
 	health   *http.Client
 	provider Provider
+	// tenants maps API key -> tenant state; nil in open mode.
+	tenants map[string]*tenant
 }
 
 func New(cfg Config) *Server {
@@ -52,6 +57,7 @@ func NewWithProvider(cfg Config, p Provider) *Server {
 		mux:      http.NewServeMux(),
 		health:   &http.Client{Timeout: 5 * time.Second},
 		provider: p,
+		tenants:  buildTenants(cfg.Tenants),
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletions)
