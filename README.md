@@ -10,8 +10,9 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 2 — streaming proxy with hand-rolled circuit breakers and
-provider failover; recovery detected by active health probes.
+Status: session 3 — streaming proxy with hand-rolled circuit breakers,
+provider failover, and multi-tenant token-budget rate limiting
+(estimate → reserve → settle).
 
 ## Use it like OpenAI
 
@@ -96,6 +97,38 @@ docker compose start ollama  # probe closes the breaker; traffic returns
 
 Streams fail over only before the first byte — once chunks have reached the
 client, a replay would duplicate content, so mid-stream failures surface as-is.
+
+## Token-budget rate limiting
+
+Budgets are denominated in LLM tokens, not requests — one request can cost 5
+tokens or 5000, so request counting protects nothing that bills by the token.
+The catch: a request's true cost is unknown until the stream finishes, which
+breaks the classic token bucket. Admission is therefore a three-step protocol
+(`internal/gateway/budget.go`):
+
+1. **estimate** the cost before calling the provider (prompt ≈ chars/4,
+   completion = `max_tokens` or a default),
+2. **reserve** the estimate against the tenant's bucket — or reject with
+   `429` and an honest `Retry-After`,
+3. **settle** when the true cost is known: refund the overestimate, or charge
+   the overrun — driving the bucket into *debt*, because streamed tokens
+   can't be un-streamed.
+
+Tenants are configured as `name:api-key:tokens-per-minute` (burst capacity =
+one minute of refill); clients authenticate the OpenAI way, so SDKs just set
+`api_key`. No tenants configured = open mode, nothing rate limited.
+
+```sh
+SCOPE_TENANTS=acme:sk-acme:300,globex:sk-globex:60000 go run ./cmd/gateway
+```
+
+```sh
+python3 examples/budget_demo.py   # concurrent greedy clients vs one budget
+```
+
+`/healthz` shows each tenant's live balance and admission counters; a
+rejected request never reaches the provider, and a client disconnect
+mid-stream still settles for the tokens that actually streamed.
 
 ## Test
 
