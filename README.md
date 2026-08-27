@@ -10,15 +10,16 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 7 (phase B underway) — the gateway (streaming proxy,
+Status: session 8 (phase B underway) — the gateway (streaming proxy,
 hand-rolled circuit breakers, failover, token-budget rate limiting,
 response cache, telemetry emission) is complete; the backend has its
 durability spine (from-scratch WAL with torn-write recovery), its
 compression engine (the Gorilla paper's delta-of-delta + XOR codec,
-measured at 3.07 bytes/sample on real gateway telemetry vs 16 raw), and
-the storage engine's core: an in-memory head block of live Gorilla
-streams, immutable segment files, an inverted label index, and unified
-queries across the head/segment boundary.
+measured at 3.07 bytes/sample on real gateway telemetry vs 16 raw), and a
+complete storage engine: head block of live Gorilla streams, immutable
+segment files, inverted label index, unified queries, compaction with
+retention, a cardinality guard, and crash recovery proven by a kill -9
+demo — every acknowledged sample queryable after an unclean death.
 
 ## Use it like OpenAI
 
@@ -272,8 +273,41 @@ its recovery contract, deliberately: a WAL ends in a torn write on every
 crash, so recovery keeps the longest valid prefix — a segment was fsynced
 and atomically renamed into place, so there is no legal way for one to be
 half-good, and any bad byte refuses to open rather than serving partial
-history. Compaction, retention, cardinality guards, and WAL replay into
-the head arrive in session 8.
+history.
+
+The engine runs live inside the collector: accepted metrics flow into the
+head through the same `Consumer` socket as everything else, a maintenance
+loop (`SCOPE_TSDB_FLUSH`, default 60s) flushes and compacts, and on
+restart the collector's WAL replay repopulates the head — samples already
+flushed into segments come back as duplicates that the read path dedupes
+and the next compaction removes physically.
+
+- **Compaction** merges all segments into one and is crash-safe by
+  ordering plus idempotence: the merged output atomically replaces the
+  oldest input before the newer inputs are deleted, and a crash anywhere
+  in between leaves only harmless subsets that dedupe away. This buys
+  cheap reads with write amplification — the read/write/space
+  amplification triangle, chosen deliberately and documented in the code.
+- **Retention** (`SCOPE_TSDB_RETENTION`, default: keep everything) rides
+  along free: the merge is already re-encoding every sample, so expiry is
+  just "don't copy it forward".
+- **Cardinality guard** (`SCOPE_TSDB_MAX_SERIES`, default 10,000): a
+  sample that would mint a new series past the cap is rejected and counted
+  — one unbounded label value (a request id, a raw URL) otherwise mints
+  series without limit and melts the index, which is how real TSDBs die.
+
+Prove the whole story with a real `kill -9` mid-ingest, mid-flush,
+mid-compaction:
+
+```sh
+python3 examples/tsdb_crash_recovery_demo.py
+```
+
+Unlike the WAL demo, this one verifies by *querying*: after the kill and
+restart, every acknowledged sample must come back from the real read path
+(head + segments + merge + dedupe), exactly once. A live run: SIGKILL
+after 760 acked samples with 500ms flush/compact cycles in flight —
+760/760 recovered, 1 segment on disk.
 
 ## Test
 
