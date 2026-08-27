@@ -27,6 +27,10 @@ type DB struct {
 	mu       sync.Mutex
 	segments []*Segment // oldest → newest by sequence number
 	nextSeq  uint64
+
+	// compactMu serializes compactions without blocking ingest — Compact
+	// holds it for the whole merge but takes mu only to snapshot and swap.
+	compactMu sync.Mutex
 }
 
 // Open loads a DB from dir, creating it if needed. Existing segments are
