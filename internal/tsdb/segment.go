@@ -108,28 +108,7 @@ func (h *Head) Flush(path string) (int, error) {
 		return h.series[ids[i]].labels.Key() < h.series[ids[j]].labels.Key()
 	})
 
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return 0, err
-	}
-	defer os.Remove(tmp) // no-op after a successful rename
-
-	if err := writeSegmentTo(f, h.series, ids); err != nil {
-		f.Close()
-		return 0, err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return 0, err
-	}
-	if err := f.Close(); err != nil {
-		return 0, err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return 0, err
-	}
-	if err := syncDir(filepath.Dir(path)); err != nil {
+	if err := writeSegmentFile(path, h.series, ids); err != nil {
 		return 0, err
 	}
 
@@ -137,6 +116,34 @@ func (h *Head) Flush(path string) (int, error) {
 	h.ix = newMemIndex()
 	h.series = map[uint64]*memSeries{}
 	return n, nil
+}
+
+// writeSegmentFile writes series (in the given id order) to path with the
+// crash-safe tmp → fsync → rename → fsync-dir dance. Shared by Flush and
+// compaction — one implementation of "how a segment becomes durable".
+func writeSegmentFile(path string, series map[uint64]*memSeries, ids []uint64) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp) // no-op after a successful rename
+
+	if err := writeSegmentTo(f, series, ids); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
 }
 
 func writeSegmentTo(w io.Writer, series map[uint64]*memSeries, ids []uint64) error {
