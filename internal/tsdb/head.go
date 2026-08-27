@@ -37,6 +37,16 @@ type Series struct {
 // appends succeed.
 var ErrOutOfOrder = errors.New("tsdb: sample out of order for series")
 
+// ErrTooManySeries rejects a sample that would mint a NEW series past the
+// configured limit — samples for already-known series are always accepted.
+// This is the cardinality guard: every distinct label combination costs a
+// live Gorilla stream, an index entry, and posting-list slots forever, so
+// one unbounded label (a request id, a user id, a raw URL) mints series
+// without limit and melts the index. Real TSDBs die this way routinely;
+// the guard turns the incident into a counted, visible rejection at the
+// door instead of an OOM at 3am.
+var ErrTooManySeries = errors.New("tsdb: series limit reached")
+
 // memSeries is one series' live state in the head.
 type memSeries struct {
 	labels Labels
@@ -53,10 +63,22 @@ type Head struct {
 	mu     sync.RWMutex
 	ix     *memIndex
 	series map[uint64]*memSeries
+	// maxSeries caps distinct series identities (0 = unlimited); see
+	// ErrTooManySeries. The limit survives flushes on purpose: a flush
+	// empties the head, and without carrying the cap forward a cardinality
+	// explosion would simply restart every flush interval.
+	maxSeries int
 }
 
 func NewHead() *Head {
 	return &Head{ix: newMemIndex(), series: map[uint64]*memSeries{}}
+}
+
+// SetMaxSeries sets the cardinality guard's limit (0 = unlimited).
+func (h *Head) SetMaxSeries(n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.maxSeries = n
 }
 
 // Append adds one sample to the series identified by ls, registering the
@@ -65,6 +87,14 @@ func NewHead() *Head {
 func (h *Head) Append(ls Labels, t int64, v float64) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// The guard must run before getOrCreate: registering the identity and
+	// then refusing the sample would grow the index anyway — exactly the
+	// resource the guard exists to protect.
+	if h.maxSeries > 0 && h.ix.numSeries() >= h.maxSeries {
+		if _, known := h.ix.byKey[ls.Key()]; !known {
+			return ErrTooManySeries
+		}
+	}
 	id, created := h.ix.getOrCreate(ls)
 	s := h.series[id]
 	if created {

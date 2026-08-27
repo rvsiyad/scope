@@ -188,5 +188,8 @@ func (db *DB) NumSegments() int {
 }
 
 // Head exposes the live head block (its scoreboard feeds /healthz and the
-// S8 cardinality guard).
+// cardinality guard).
 func (db *DB) Head() *Head { return db.head }
+
+// SetMaxSeries sets the head's cardinality guard (see ErrTooManySeries).
+func (db *DB) SetMaxSeries(n int) { db.head.SetMaxSeries(n) }

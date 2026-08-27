@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/rvsiyad/scope/internal/collector"
 	"github.com/rvsiyad/scope/internal/wal"
@@ -31,12 +33,34 @@ func main() {
 		log.Fatalf("SCOPE_WAL_SYNC: want always|interval|never, got %q", os.Getenv("SCOPE_WAL_SYNC"))
 	}
 
-	srv, err := collector.New(collector.Config{WALPath: walPath, SyncPolicy: policy})
+	tsdbDir := envOr("SCOPE_TSDB_DIR", "data/tsdb")
+	flushEvery, err := time.ParseDuration(envOr("SCOPE_TSDB_FLUSH", "60s"))
+	if err != nil {
+		log.Fatalf("SCOPE_TSDB_FLUSH: %v", err)
+	}
+	retention, err := time.ParseDuration(envOr("SCOPE_TSDB_RETENTION", "0s"))
+	if err != nil {
+		log.Fatalf("SCOPE_TSDB_RETENTION: %v", err)
+	}
+	maxSeries, err := strconv.Atoi(envOr("SCOPE_TSDB_MAX_SERIES", "10000"))
+	if err != nil {
+		log.Fatalf("SCOPE_TSDB_MAX_SERIES: %v", err)
+	}
+
+	srv, err := collector.New(collector.Config{
+		WALPath:        walPath,
+		SyncPolicy:     policy,
+		TSDBDir:        tsdbDir,
+		TSDBFlushEvery: flushEvery,
+		TSDBRetention:  retention,
+		TSDBMaxSeries:  maxSeries,
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer srv.Close()
-	log.Printf("collector listening on %s (wal=%s sync=%s)", addr, walPath, envOr("SCOPE_WAL_SYNC", "always"))
+	log.Printf("collector listening on %s (wal=%s sync=%s tsdb=%s flush=%s)",
+		addr, walPath, envOr("SCOPE_WAL_SYNC", "always"), tsdbDir, flushEvery)
 	if err := http.ListenAndServe(addr, srv); err != nil {
 		log.Fatal(err)
 	}

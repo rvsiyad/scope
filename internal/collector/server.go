@@ -4,8 +4,9 @@
 // log, and hands batches off to the stores. The ack contract is the point:
 // a 204 means the batch is in the WAL — under the "always" sync policy,
 // fsync'd — so acknowledged telemetry survives a crash and is replayed
-// into the stores on restart. The stores themselves (tsdb, traces) arrive
-// later in phase B; the Consumer interface is their socket.
+// into the stores on restart. Metrics land in the tsdb engine (tsdb.go);
+// the trace store arrives later in phase B through the same Consumer
+// socket.
 package collector
 
 import (
@@ -14,8 +15,10 @@ import (
 	"io"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"github.com/rvsiyad/scope/internal/telemetry"
+	"github.com/rvsiyad/scope/internal/tsdb"
 	"github.com/rvsiyad/scope/internal/wal"
 )
 
@@ -37,12 +40,28 @@ type Config struct {
 	// SyncPolicy is the WAL's ack dial (see the wal package): "always"
 	// means a 204 survives power loss, and is the default in cmd/collector.
 	SyncPolicy wal.SyncPolicy
+
+	// TSDBDir enables the metrics store: accepted MetricPoints flow into a
+	// tsdb.DB rooted here (see tsdb.go in this package). Empty disables it.
+	TSDBDir string
+	// TSDBFlushEvery is the maintenance cadence: each tick flushes the
+	// head into a segment and compacts. Zero means no background
+	// maintenance (unit tests drive flushes explicitly).
+	TSDBFlushEvery time.Duration
+	// TSDBRetention drops samples older than this at compaction time.
+	// Zero keeps everything.
+	TSDBRetention time.Duration
+	// TSDBMaxSeries is the cardinality guard's cap (0 = unlimited).
+	TSDBMaxSeries int
 }
 
 type Server struct {
 	mux       *http.ServeMux
 	log       *wal.WAL // nil when durability is disabled
 	consumers []Consumer
+	tsdb      *tsdbStore // nil when the metrics store is disabled
+	stop      chan struct{}
+	done      chan struct{}
 
 	batches atomic.Uint64
 	spans   atomic.Uint64
@@ -58,7 +77,20 @@ type Server struct {
 // Replay happens before the first request can arrive, so consumers see
 // history strictly before the present.
 func New(cfg Config, consumers ...Consumer) (*Server, error) {
-	s := &Server{mux: http.NewServeMux(), consumers: consumers}
+	s := &Server{mux: http.NewServeMux(), consumers: consumers,
+		stop: make(chan struct{}), done: make(chan struct{})}
+	// The tsdb store must register BEFORE the WAL replay below runs: the
+	// replay feeds the consumer list, and the head block repopulating from
+	// the log is exactly the crash-recovery story.
+	if cfg.TSDBDir != "" {
+		db, err := tsdb.Open(cfg.TSDBDir)
+		if err != nil {
+			return nil, fmt.Errorf("collector: tsdb: %w", err)
+		}
+		db.SetMaxSeries(cfg.TSDBMaxSeries)
+		s.tsdb = &tsdbStore{db: db}
+		s.consumers = append(s.consumers, s.tsdb.consume)
+	}
 	if cfg.WALPath != "" {
 		w, err := wal.Open(wal.Options{Path: cfg.WALPath, Policy: cfg.SyncPolicy})
 		if err != nil {
@@ -81,6 +113,19 @@ func New(cfg Config, consumers ...Consumer) (*Server, error) {
 	}
 	s.mux.HandleFunc("POST /v1/ingest", s.handleIngest)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	if s.tsdb != nil {
+		s.mux.HandleFunc("GET /debug/tsdb/select", s.tsdb.handleSelect)
+		if cfg.TSDBFlushEvery > 0 {
+			go func() {
+				defer close(s.done)
+				s.tsdb.maintain(cfg.TSDBFlushEvery, cfg.TSDBRetention, s.stop)
+			}()
+		} else {
+			close(s.done)
+		}
+	} else {
+		close(s.done)
+	}
 	return s, nil
 }
 
@@ -88,8 +133,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// Close flushes and closes the WAL.
+// Close stops maintenance, flushes the head into a final segment (a
+// graceful shutdown should not leave its samples to the next replay), and
+// closes the WAL. Crash shutdowns skip all of this by definition — that
+// path is covered by the WAL replay in New.
 func (s *Server) Close() error {
+	close(s.stop)
+	<-s.done
+	if s.tsdb != nil {
+		if err := s.tsdb.db.Flush(); err != nil {
+			return err
+		}
+	}
 	if s.log == nil {
 		return nil
 	}
@@ -178,6 +233,7 @@ type Status struct {
 
 	WAL       *wal.Status `json:"wal,omitempty"`
 	WALErrors uint64      `json:"wal_errors,omitempty"`
+	TSDB      *TSDBStatus `json:"tsdb,omitempty"`
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -192,6 +248,9 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if s.log != nil {
 		ws := s.log.Status()
 		st.WAL = &ws
+	}
+	if s.tsdb != nil {
+		st.TSDB = s.tsdb.status()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(st)
