@@ -3,6 +3,7 @@ package tsdb
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -205,6 +206,46 @@ func TestHeadConcurrentAppendAndSelect(t *testing.T) {
 		if len(s.Samples) != samples {
 			t.Fatalf("%s has %d samples, want %d", s.Labels.Key(), len(s.Samples), samples)
 		}
+	}
+}
+
+func TestHeadCardinalityGuard(t *testing.T) {
+	h := NewHead()
+	h.SetMaxSeries(2)
+	a := NewLabels("m", map[string]string{"id": "a"})
+	b := NewLabels("m", map[string]string{"id": "b"})
+	for _, ls := range []Labels{a, b} {
+		if err := h.Append(ls, 1000, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A third identity is refused — and must not grow the index either:
+	// register-then-refuse would consume exactly the resource the guard
+	// protects.
+	hostile := NewLabels("m", map[string]string{"id": "c"})
+	if err := h.Append(hostile, 1000, 1); err != ErrTooManySeries {
+		t.Fatalf("err = %v, want ErrTooManySeries", err)
+	}
+	if h.NumSeries() != 2 {
+		t.Fatalf("NumSeries = %d after rejection, want 2", h.NumSeries())
+	}
+	// Known series keep accepting samples at the limit.
+	if err := h.Append(a, 2000, 2); err != nil {
+		t.Fatalf("known series rejected at limit: %v", err)
+	}
+	// The guard survives a flush: the emptied head would otherwise let a
+	// cardinality explosion restart every flush interval.
+	if _, err := h.Flush(filepath.Join(t.TempDir(), "0001.seg")); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		ls := NewLabels("m", map[string]string{"id": fmt.Sprint(i)})
+		if err := h.Append(ls, 3000, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h.Append(hostile, 3000, 1); err != ErrTooManySeries {
+		t.Fatalf("post-flush err = %v, want ErrTooManySeries", err)
 	}
 }
 
