@@ -10,12 +10,15 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 6 (phase B underway) — the gateway (streaming proxy,
+Status: session 7 (phase B underway) — the gateway (streaming proxy,
 hand-rolled circuit breakers, failover, token-budget rate limiting,
 response cache, telemetry emission) is complete; the backend has its
-durability spine (from-scratch WAL with torn-write recovery) and its
+durability spine (from-scratch WAL with torn-write recovery), its
 compression engine (the Gorilla paper's delta-of-delta + XOR codec,
-measured at 3.07 bytes/sample on real gateway telemetry vs 16 raw).
+measured at 3.07 bytes/sample on real gateway telemetry vs 16 raw), and
+the storage engine's core: an in-memory head block of live Gorilla
+streams, immutable segment files, an inverted label index, and unified
+queries across the head/segment boundary.
 
 ## Use it like OpenAI
 
@@ -50,9 +53,10 @@ curl -N localhost:8090/v1/chat/completions -d '{
 | `internal/collector` | ingest API: validate → WAL → ack; handoff to the stores |
 | `internal/wal` | append-only log, CRC records, torn-write recovery, fsync policies |
 | `internal/gorilla` | the paper's codec: delta-of-delta timestamps, XOR values |
+| `internal/tsdb` | the storage engine: head block, segment files, inverted label index, unified reads |
 | `docs/` | learning log, ADRs |
 
-Later phases add `tsdb` (the storage engine), `tracestore`, `query`, and `ui`.
+Later phases add `tracestore`, `query`, and `ui`.
 
 ## Run
 
@@ -238,6 +242,38 @@ paper's fleet-wide 1.37, while continuous millisecond durations churn the
 full mantissa every sample and settle for ~2x. `compressbench` re-decodes
 every block and compares bit patterns before reporting — a compression
 number from a codec that can't round-trip would be worse than no number.
+
+## Time-series storage engine
+
+`internal/tsdb` is Prometheus's storage architecture, miniaturized — the
+same shape as the engine behind every serious metrics product:
+
+- **Head block:** every series' newest samples, held in memory as one
+  *live Gorilla stream per series* — appends compress on arrival, so the
+  head's memory cost is the measured ~1–3 bytes/sample, not 16. Samples
+  per series must be strictly ascending; the delta-encoded append-only
+  stream physically can't hold anything else, which is why Prometheus has
+  the same rule.
+- **Segments:** a flush freezes the head into an immutable,
+  time-partitioned file (write `.tmp` → fsync → rename → fsync the
+  directory) and the head starts over. Immutability is what keeps the rest
+  simple: segment reads need no locks, and compaction can replace files
+  wholesale with an atomic rename.
+- **Inverted label index:** `label pair → posting list of series IDs`, a
+  search engine's data structure pointed at telemetry. Multi-matcher
+  queries intersect posting lists (shortest first) instead of scanning
+  series.
+- **Unified reads:** one `Select` over head + segments, merged per series
+  identity — a query can't tell where the head/segment boundary falls,
+  which is the point: that boundary moves on every flush.
+
+Segment files reuse the WAL's framing (length-prefixed, CRC32C) but invert
+its recovery contract, deliberately: a WAL ends in a torn write on every
+crash, so recovery keeps the longest valid prefix — a segment was fsynced
+and atomically renamed into place, so there is no legal way for one to be
+half-good, and any bad byte refuses to open rather than serving partial
+history. Compaction, retention, cardinality guards, and WAL replay into
+the head arrive in session 8.
 
 ## Test
 
