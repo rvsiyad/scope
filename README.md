@@ -309,6 +309,51 @@ restart, every acknowledged sample must come back from the real read path
 after 760 acked samples with 500ms flush/compact cycles in flight —
 760/760 recovered, 1 segment on disk.
 
+## Trace store
+
+`internal/tracestore` is the *other* storage engine — and the reason there
+are two is the deepest storage lesson in the repo: **layout follows read
+pattern**. Metrics are scanned by label over a time range, so the tsdb
+stores per-series Gorilla streams behind an inverted label index. Traces
+are fetched whole by id ("click this request, show me its waterfall"), so
+here the unit of storage is the complete span tree and the index is a
+plain `trace id → record` map. Same skeleton, deliberately different
+organs:
+
+- **Shared with the tsdb:** an in-memory head fed through the collector's
+  `Consumer` socket (so WAL replay rebuilds it after a crash, for free),
+  immutable segment files with the same length-prefixed CRC32C framing,
+  the same `.tmp` → fsync → rename flush, and the same refuse-to-open
+  contract on any damaged byte.
+- **Different on purpose:** no ordering constraint on arrival (nothing is
+  delta-encoded), records keyed by id instead of labels, span bodies
+  decoded lazily (a directory listing touches only meta headers), and **no
+  merge compaction** — a read-by-id is one map probe per segment, so many
+  small segments cost microseconds where a range scan would degrade
+  linearly. Retention just drops whole expired segment files.
+- **Traces stay whole across everything:** a trace split by a flush, or
+  re-delivered by WAL replay after a graceful shutdown, reassembles on
+  every read (merge all sources, dedupe by span id). Sampling
+  (`SCOPE_TRACE_KEEP`, default 1 = keep all) hashes the *trace id*, so
+  every span of a trace gets the same verdict across batches, restarts,
+  and collectors.
+
+The collector serves the read side directly:
+
+```sh
+curl 'localhost:9091/v1/traces?limit=5'          # request log, newest first
+curl 'localhost:9091/v1/traces/<trace_id>'       # full waterfall span tree
+```
+
+The waterfall endpoint returns the nested tree — each span with its
+timings, duration, and attrs (tenant, model, token counts, cost live on
+the root) — which is exactly what the phase-C UI will render. See it end
+to end against a live gateway:
+
+```sh
+python3 examples/trace_waterfall_demo.py
+```
+
 ## Test
 
 ```sh

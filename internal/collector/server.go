@@ -5,7 +5,7 @@
 // a 204 means the batch is in the WAL — under the "always" sync policy,
 // fsync'd — so acknowledged telemetry survives a crash and is replayed
 // into the stores on restart. Metrics land in the tsdb engine (tsdb.go);
-// the trace store arrives later in phase B through the same Consumer
+// spans land in the trace store (traces.go) through the same Consumer
 // socket.
 package collector
 
@@ -14,10 +14,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/rvsiyad/scope/internal/telemetry"
+	"github.com/rvsiyad/scope/internal/tracestore"
 	"github.com/rvsiyad/scope/internal/tsdb"
 	"github.com/rvsiyad/scope/internal/wal"
 )
@@ -53,13 +55,30 @@ type Config struct {
 	TSDBRetention time.Duration
 	// TSDBMaxSeries is the cardinality guard's cap (0 = unlimited).
 	TSDBMaxSeries int
+
+	// TraceDir enables the trace store: accepted Spans flow into a
+	// tracestore.Store rooted here (see traces.go in this package). Empty
+	// disables it.
+	TraceDir string
+	// TraceFlushEvery is the trace store's maintenance cadence: each tick
+	// flushes the trace head into a segment and enforces retention. Zero
+	// means no background maintenance.
+	TraceFlushEvery time.Duration
+	// TraceRetention drops whole trace segments older than this at
+	// maintenance time. Zero keeps everything.
+	TraceRetention time.Duration
+	// TraceKeepRatio is the sampling policy: the fraction of traces kept,
+	// decided per trace id so traces stay whole. Zero means unset — keep
+	// everything (as does any ratio >= 1).
+	TraceKeepRatio float64
 }
 
 type Server struct {
 	mux       *http.ServeMux
 	log       *wal.WAL // nil when durability is disabled
 	consumers []Consumer
-	tsdb      *tsdbStore // nil when the metrics store is disabled
+	tsdb      *tsdbStore  // nil when the metrics store is disabled
+	traces    *traceStore // nil when the trace store is disabled
 	stop      chan struct{}
 	done      chan struct{}
 
@@ -91,6 +110,19 @@ func New(cfg Config, consumers ...Consumer) (*Server, error) {
 		s.tsdb = &tsdbStore{db: db}
 		s.consumers = append(s.consumers, s.tsdb.consume)
 	}
+	// Same rule for the trace store: registered before replay so the trace
+	// head repopulates from the log.
+	if cfg.TraceDir != "" {
+		store, err := tracestore.Open(cfg.TraceDir)
+		if err != nil {
+			return nil, fmt.Errorf("collector: tracestore: %w", err)
+		}
+		if cfg.TraceKeepRatio > 0 {
+			store.SetSampler(tracestore.KeepRatio(cfg.TraceKeepRatio))
+		}
+		s.traces = &traceStore{store: store}
+		s.consumers = append(s.consumers, s.traces.consume)
+	}
 	if cfg.WALPath != "" {
 		w, err := wal.Open(wal.Options{Path: cfg.WALPath, Policy: cfg.SyncPolicy})
 		if err != nil {
@@ -115,17 +147,32 @@ func New(cfg Config, consumers ...Consumer) (*Server, error) {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	if s.tsdb != nil {
 		s.mux.HandleFunc("GET /debug/tsdb/select", s.tsdb.handleSelect)
-		if cfg.TSDBFlushEvery > 0 {
-			go func() {
-				defer close(s.done)
-				s.tsdb.maintain(cfg.TSDBFlushEvery, cfg.TSDBRetention, s.stop)
-			}()
-		} else {
-			close(s.done)
-		}
-	} else {
-		close(s.done)
 	}
+	if s.traces != nil {
+		s.mux.HandleFunc("GET /v1/traces", s.traces.handleList)
+		s.mux.HandleFunc("GET /v1/traces/{id}", s.traces.handleTrace)
+	}
+	// Each store gets its own maintenance loop; done closes when every loop
+	// has stopped (immediately, when none run).
+	var maint sync.WaitGroup
+	if s.tsdb != nil && cfg.TSDBFlushEvery > 0 {
+		maint.Add(1)
+		go func() {
+			defer maint.Done()
+			s.tsdb.maintain(cfg.TSDBFlushEvery, cfg.TSDBRetention, s.stop)
+		}()
+	}
+	if s.traces != nil && cfg.TraceFlushEvery > 0 {
+		maint.Add(1)
+		go func() {
+			defer maint.Done()
+			s.traces.maintain(cfg.TraceFlushEvery, cfg.TraceRetention, s.stop)
+		}()
+	}
+	go func() {
+		maint.Wait()
+		close(s.done)
+	}()
 	return s, nil
 }
 
@@ -142,6 +189,11 @@ func (s *Server) Close() error {
 	<-s.done
 	if s.tsdb != nil {
 		if err := s.tsdb.db.Flush(); err != nil {
+			return err
+		}
+	}
+	if s.traces != nil {
+		if err := s.traces.store.Flush(); err != nil {
 			return err
 		}
 	}
@@ -231,9 +283,10 @@ type Status struct {
 	Metrics uint64 `json:"metrics_received"`
 	Invalid uint64 `json:"invalid_rejected"`
 
-	WAL       *wal.Status `json:"wal,omitempty"`
-	WALErrors uint64      `json:"wal_errors,omitempty"`
-	TSDB      *TSDBStatus `json:"tsdb,omitempty"`
+	WAL       *wal.Status  `json:"wal,omitempty"`
+	WALErrors uint64       `json:"wal_errors,omitempty"`
+	TSDB      *TSDBStatus  `json:"tsdb,omitempty"`
+	Traces    *TraceStatus `json:"traces,omitempty"`
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -251,6 +304,9 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.tsdb != nil {
 		st.TSDB = s.tsdb.status()
+	}
+	if s.traces != nil {
+		st.Traces = s.traces.status()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(st)

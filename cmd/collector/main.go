@@ -47,20 +47,41 @@ func main() {
 		log.Fatalf("SCOPE_TSDB_MAX_SERIES: %v", err)
 	}
 
+	traceDir := envOr("SCOPE_TRACE_DIR", "data/traces")
+	traceFlush, err := time.ParseDuration(envOr("SCOPE_TRACE_FLUSH", "60s"))
+	if err != nil {
+		log.Fatalf("SCOPE_TRACE_FLUSH: %v", err)
+	}
+	traceRetention, err := time.ParseDuration(envOr("SCOPE_TRACE_RETENTION", "0s"))
+	if err != nil {
+		log.Fatalf("SCOPE_TRACE_RETENTION: %v", err)
+	}
+	// 1 = keep every trace; the knob exists so a loaded deployment can dial
+	// down without redeploying (the decision hashes the trace id, so any
+	// ratio keeps traces whole).
+	traceKeep, err := strconv.ParseFloat(envOr("SCOPE_TRACE_KEEP", "1"), 64)
+	if err != nil {
+		log.Fatalf("SCOPE_TRACE_KEEP: %v", err)
+	}
+
 	srv, err := collector.New(collector.Config{
-		WALPath:        walPath,
-		SyncPolicy:     policy,
-		TSDBDir:        tsdbDir,
-		TSDBFlushEvery: flushEvery,
-		TSDBRetention:  retention,
-		TSDBMaxSeries:  maxSeries,
+		WALPath:         walPath,
+		SyncPolicy:      policy,
+		TSDBDir:         tsdbDir,
+		TSDBFlushEvery:  flushEvery,
+		TSDBRetention:   retention,
+		TSDBMaxSeries:   maxSeries,
+		TraceDir:        traceDir,
+		TraceFlushEvery: traceFlush,
+		TraceRetention:  traceRetention,
+		TraceKeepRatio:  traceKeep,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer srv.Close()
-	log.Printf("collector listening on %s (wal=%s sync=%s tsdb=%s flush=%s)",
-		addr, walPath, envOr("SCOPE_WAL_SYNC", "always"), tsdbDir, flushEvery)
+	log.Printf("collector listening on %s (wal=%s sync=%s tsdb=%s flush=%s traces=%s)",
+		addr, walPath, envOr("SCOPE_WAL_SYNC", "always"), tsdbDir, flushEvery, traceDir)
 	if err := http.ListenAndServe(addr, srv); err != nil {
 		log.Fatal(err)
 	}
