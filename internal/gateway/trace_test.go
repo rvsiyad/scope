@@ -283,3 +283,44 @@ func TestNoCollectorMeansNilEmitter(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 }
+
+func TestCounterMetricsAreCumulative(t *testing.T) {
+	// The _total series carry running totals, not per-request values:
+	// that is what makes rate() work downstream. A miss (15 tokens) then
+	// two hits (0 provider tokens each): tokens_total must read 15 three
+	// times — constant because nothing new was spent — while the hit
+	// series of requests_total climbs 1, 2 across its own samples.
+	srv, cap := tracedServer(t, 400)
+	for i, wantTotal := range []int{1, 2, 3} {
+		postChatAs(t, srv, "sk-acme", deterministicChat)
+		waitFor(t, "trace arrival", func() bool {
+			return len(cap.metricValues("gateway_requests_total")) == wantTotal
+		})
+		_ = i
+	}
+
+	tokens := cap.metricValues("gateway_tokens_total")
+	if len(tokens) != 3 {
+		t.Fatalf("tokens_total samples = %d, want 3", len(tokens))
+	}
+	for i, m := range tokens {
+		if m.Value != 15 {
+			t.Fatalf("tokens_total[%d] = %v, want the cumulative 15 (hits add nothing)", i, m.Value)
+		}
+	}
+
+	var hits []float64
+	for _, m := range cap.metricValues("gateway_requests_total") {
+		if m.Labels["cache"] == "hit" {
+			hits = append(hits, m.Value)
+		}
+	}
+	if len(hits) != 2 || hits[0] != 1 || hits[1] != 2 {
+		t.Fatalf("requests_total{cache=hit} = %v, want the climbing [1 2]", hits)
+	}
+
+	cost := cap.metricValues("gateway_cost_usd")
+	if got := cost[len(cost)-1].Value; got != 0.006 {
+		t.Fatalf("final cost_usd = %v, want the cumulative 0.006", got)
+	}
+}

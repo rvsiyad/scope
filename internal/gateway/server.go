@@ -56,6 +56,9 @@ type Server struct {
 	// emitter ships spans and metrics to the collector; nil when no
 	// collector is configured (Record* on nil is a no-op by design).
 	emitter *telemetry.Emitter
+	// counters holds the cumulative totals behind the _total metric
+	// series (see counters.go).
+	counters *counterSet
 	// tenants maps API key -> tenant state; nil in open mode.
 	tenants map[string]*tenant
 }
@@ -88,6 +91,7 @@ func NewWithProvider(cfg Config, p Provider) *Server {
 		health:   &http.Client{Timeout: 5 * time.Second},
 		provider: p,
 		cache:    NewResponseCache(cfg.CacheEntries, cfg.CacheTTL),
+		counters: newCounterSet(),
 		tenants:  buildTenants(cfg.Tenants),
 	}
 	if cfg.CollectorURL != "" {
