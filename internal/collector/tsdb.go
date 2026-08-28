@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rvsiyad/scope/internal/query"
 	"github.com/rvsiyad/scope/internal/telemetry"
 	"github.com/rvsiyad/scope/internal/tsdb"
 )
@@ -33,6 +34,7 @@ import (
 // it, count it, keep it visible on /healthz.
 type tsdbStore struct {
 	db             *tsdb.DB
+	engine         *query.Engine // the PromQL-lite layer over db (query.go)
 	oodDropped     atomic.Uint64
 	seriesRejected atomic.Uint64
 	maintErrors    atomic.Uint64
