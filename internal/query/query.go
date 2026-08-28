@@ -133,6 +133,8 @@ func (e *Engine) eval(expr Expr, ts []int64) (Matrix, error) {
 	switch n := expr.(type) {
 	case VectorSelector:
 		return e.evalVectorSelector(n, ts)
+	case Call:
+		return e.evalCall(n, ts)
 	default:
 		return nil, fmt.Errorf("query: unknown expression node %T", expr)
 	}
