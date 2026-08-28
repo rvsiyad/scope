@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rvsiyad/scope/internal/query"
 	"github.com/rvsiyad/scope/internal/telemetry"
 	"github.com/rvsiyad/scope/internal/tracestore"
 	"github.com/rvsiyad/scope/internal/tsdb"
@@ -107,7 +108,7 @@ func New(cfg Config, consumers ...Consumer) (*Server, error) {
 			return nil, fmt.Errorf("collector: tsdb: %w", err)
 		}
 		db.SetMaxSeries(cfg.TSDBMaxSeries)
-		s.tsdb = &tsdbStore{db: db}
+		s.tsdb = &tsdbStore{db: db, engine: query.New(db)}
 		s.consumers = append(s.consumers, s.tsdb.consume)
 	}
 	// Same rule for the trace store: registered before replay so the trace
@@ -147,6 +148,8 @@ func New(cfg Config, consumers ...Consumer) (*Server, error) {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	if s.tsdb != nil {
 		s.mux.HandleFunc("GET /debug/tsdb/select", s.tsdb.handleSelect)
+		s.mux.HandleFunc("GET /v1/query", s.tsdb.handleQuery)
+		s.mux.HandleFunc("GET /v1/query_range", s.tsdb.handleQueryRange)
 	}
 	if s.traces != nil {
 		s.mux.HandleFunc("GET /v1/traces", s.traces.handleList)

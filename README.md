@@ -354,6 +354,59 @@ to end against a live gateway:
 python3 examples/trace_waterfall_demo.py
 ```
 
+## Query engine
+
+`internal/query` is what turns the storage engine into a database: a
+PromQL-lite layer — selectors, window functions, aggregations, and a tiny
+hand-rolled grammar — evaluated over the tsdb's unified reads, served by
+the collector:
+
+```sh
+curl --get 'localhost:9091/v1/query' \
+  --data-urlencode 'query=rate(gateway_tokens_total{tenant="acme"}[5m])'
+```
+
+```sh
+curl --get 'localhost:9091/v1/query_range' \
+  --data-urlencode 'query=sum by (tenant) (rate(gateway_tokens_total[5m]))' \
+  --data "start=$(($(date +%s)*1000 - 600000))" --data "end=$(($(date +%s)*1000))" --data 'step=30s'
+```
+
+The vocabulary is exactly what the phase-C dashboards need, with the two
+calculations every observability engineer must actually understand
+implemented from scratch and fixture-tested against hand-computed numbers:
+
+- **`rate` / `increase` with counter-reset healing** — a sample below its
+  predecessor means the process restarted, so that sample's whole value is
+  growth since the restart (`10, 20, ↯5, 8` → increase 18). One documented
+  divergence from Prometheus: no extrapolation — observed growth over the
+  observed span, hand-computable and honest about only what was seen.
+- **`quantile_over_time`** (p50/p95/p99) — the φ-quantile of the raw
+  samples in the window, linear interpolation between order statistics,
+  Prometheus's method exactly. The gateway emits raw duration samples, so
+  quantiles are exact for what was kept; pre-bucketed histograms (and
+  their cross-instance aggregatability) are the documented upgrade.
+- **`sum/avg/min/max/count by (labels)`** — cross-series folds at each
+  step that compose with window functions, because both speak the same
+  matrix shape: `sum by (tenant) (rate(...))`.
+- Also `avg/sum/min/max/count_over_time`, `=`/`!=` matchers, and range
+  queries with **step alignment** (starts floor onto the step grid, so a
+  refreshing dashboard sees stable buckets, not re-bucketed history).
+
+Semantics follow Prometheus where a dashboard would notice: instant
+lookback (5m, closed window `[t-lookback, t]`), left-open range windows
+`(t-r, t]` so a boundary sample belongs to one window, staleness as
+*absence* (a series that stopped reporting contributes nothing — not a
+phantom zero), and `rate()` dropping `__name__` from its output. One
+`Select` against the store per selector per query; every per-step
+computation is a forward-only pass over the selected samples.
+
+Watch real queries answer over live gateway traffic:
+
+```sh
+python3 examples/query_demo.py
+```
+
 ## Test
 
 ```sh
