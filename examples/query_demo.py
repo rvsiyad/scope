@@ -22,7 +22,7 @@ dashboard would:
                                             -- request rate, split hit/miss
   * quantile_over_time(0.5|0.99, gateway_request_duration_ms[2m])
                                             -- p50 / p99 request latency
-  * sum_over_time(gateway_cost_usd[2m])     -- dollars spent in the window
+  * increase(gateway_cost_usd[2m])          -- dollars spent in the window
 
 Every number comes back through the real path: parser -> engine -> unified
 head/segment reads -> window math. Stdlib only — no dependencies.
@@ -91,7 +91,7 @@ def main():
     show("Request latency p99:",
          "quantile_over_time(0.99, gateway_request_duration_ms[2m])", "ms")
     show("Dollars spent in the window:",
-         "sum_over_time(gateway_cost_usd[2m])", "USD")
+         "increase(gateway_cost_usd[2m])", "USD")
 
 
 if __name__ == "__main__":

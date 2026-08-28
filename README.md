@@ -158,9 +158,12 @@ serves streaming clients too (replayed as SSE), and vice versa.
 
 Every request emits its whole story: a span tree (`request → auth → cache
 lookup → reserve → provider → settle`) where the provider span carries the
-TTFT marker and token counts, plus per-request metric samples
-(`gateway_requests_total`, `gateway_request_duration_ms`, `gateway_ttft_ms`,
-`gateway_tokens_total`, `gateway_cost_usd`). Emission is fire-and-forget by
+TTFT marker and token counts, plus metric samples per request: cumulative
+counters (`gateway_requests_total`, `gateway_tokens_total`,
+`gateway_cost_usd` — running totals, the shape `rate()` expects; a gateway
+restart resets them to zero, which is exactly the counter reset the query
+engine heals) and gauge-shaped measurements (`gateway_request_duration_ms`,
+`gateway_ttft_ms`). Emission is fire-and-forget by
 law: a non-blocking send onto a bounded buffer, batched to the collector in
 the background; when the collector is slow or down the gateway drops and
 *counts* — never blocks, never queues unboundedly (`internal/telemetry`).

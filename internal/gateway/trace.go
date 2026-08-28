@@ -20,13 +20,14 @@ import (
 // nothing else.
 
 type reqTrace struct {
-	em      *telemetry.Emitter
-	traceID string
-	rootID  string
-	started time.Time
-	attrs   map[string]string
-	spans   []telemetry.Span
-	metrics []telemetry.MetricPoint
+	em       *telemetry.Emitter
+	counters *counterSet
+	traceID  string
+	rootID   string
+	started  time.Time
+	attrs    map[string]string
+	spans    []telemetry.Span
+	metrics  []telemetry.MetricPoint
 }
 
 func (s *Server) startTrace() *reqTrace {
@@ -34,11 +35,12 @@ func (s *Server) startTrace() *reqTrace {
 		return nil
 	}
 	return &reqTrace{
-		em:      s.emitter,
-		traceID: telemetry.NewTraceID(),
-		rootID:  telemetry.NewSpanID(),
-		started: time.Now(),
-		attrs:   map[string]string{},
+		em:       s.emitter,
+		counters: s.counters,
+		traceID:  telemetry.NewTraceID(),
+		rootID:   telemetry.NewSpanID(),
+		started:  time.Now(),
+		attrs:    map[string]string{},
 	}
 }
 
@@ -72,12 +74,40 @@ func (t *reqTrace) setAttr(k, v string) {
 	t.attrs[k] = v
 }
 
-// metric queues one sample, stamped now, carrying the trace's tenant/model
+// metric queues one gauge-shaped sample — the measured value itself
+// (a duration, a TTFT), stamped now — carrying the trace's tenant/model
 // labels plus any extras. Labels stay low-cardinality: never ids.
 func (t *reqTrace) metric(name string, value float64, extra map[string]string) {
 	if t == nil {
 		return
 	}
+	t.metrics = append(t.metrics, telemetry.MetricPoint{
+		Name:      name,
+		Labels:    t.metricLabels(extra),
+		Timestamp: time.Now().UnixMilli(),
+		Value:     value,
+	})
+}
+
+// counter queues one counter-shaped sample: the series' new CUMULATIVE
+// total after this request's contribution, not the contribution itself —
+// the shape rate() and increase() expect from a _total series (see
+// counters.go for why, and for the restart-resets-to-zero contract).
+func (t *reqTrace) counter(name string, delta float64, extra map[string]string) {
+	if t == nil {
+		return
+	}
+	labels := t.metricLabels(extra)
+	total, ts := t.counters.add(name, labels, delta)
+	t.metrics = append(t.metrics, telemetry.MetricPoint{
+		Name:      name,
+		Labels:    labels,
+		Timestamp: ts,
+		Value:     total,
+	})
+}
+
+func (t *reqTrace) metricLabels(extra map[string]string) map[string]string {
 	labels := map[string]string{}
 	for _, k := range []string{"tenant", "model"} {
 		if v, ok := t.attrs[k]; ok {
@@ -87,12 +117,7 @@ func (t *reqTrace) metric(name string, value float64, extra map[string]string) {
 	for k, v := range extra {
 		labels[k] = v
 	}
-	t.metrics = append(t.metrics, telemetry.MetricPoint{
-		Name:      name,
-		Labels:    labels,
-		Timestamp: time.Now().UnixMilli(),
-		Value:     value,
-	})
+	return labels
 }
 
 // charge records what the request actually cost once it is known: the
@@ -105,8 +130,8 @@ func (t *reqTrace) charge(tokens int, pricePerMTokens float64) {
 	cost := float64(tokens) * pricePerMTokens / 1e6
 	t.setAttr("tokens_total", strconv.Itoa(tokens))
 	t.setAttr("cost_usd", strconv.FormatFloat(cost, 'f', -1, 64))
-	t.metric("gateway_tokens_total", float64(tokens), nil)
-	t.metric("gateway_cost_usd", cost, nil)
+	t.counter("gateway_tokens_total", float64(tokens), nil)
+	t.counter("gateway_cost_usd", cost, nil)
 }
 
 // finish closes the root span and hands the whole trace to the emitter,
@@ -136,7 +161,7 @@ func (t *reqTrace) finish() {
 			outcome[k] = v
 		}
 	}
-	t.metric("gateway_requests_total", 1, outcome)
+	t.counter("gateway_requests_total", 1, outcome)
 	t.metric("gateway_request_duration_ms", float64(end.Sub(t.started))/float64(time.Millisecond), nil)
 	for _, m := range t.metrics {
 		t.em.RecordMetric(m)
