@@ -10,16 +10,17 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 11 (phase C) — the gateway (streaming proxy, hand-rolled
-circuit breakers, failover, token-budget rate limiting, response cache,
-telemetry emission) is complete, and so is the backend: a durability
-spine (from-scratch WAL with torn-write recovery), the Gorilla codec
-(delta-of-delta + XOR, measured at 3.07 bytes/sample on real gateway
-telemetry vs 16 raw), a full storage engine (head block, immutable
-segments, inverted label index, compaction, cardinality guard, kill -9
-crash recovery), a trace store, a PromQL-lite query engine, and live
-dashboards with a trace waterfall viewer served straight out of the
-collector. Remaining: deploy, docs.
+Status: build complete (sessions 1–13). The gateway (streaming proxy,
+hand-rolled circuit breakers, failover, token-budget rate limiting,
+response cache, telemetry emission), the backend (from-scratch WAL with
+torn-write recovery, the Gorilla codec at 3.07 bytes/sample measured on
+real telemetry, head/segment storage engine with inverted label index,
+compaction, cardinality guard, kill -9 crash recovery, trace store,
+PromQL-lite query engine), live dashboards with a trace waterfall
+viewer, [measured benchmarks](docs/benchmarks.md) with a CI smoke run,
+six [ADRs](docs/adr/), and a [one-script VM deploy](deploy/README.md)
+with gated CD. Remaining: provision the demo VM and flip
+`DEPLOY_ENABLED`; launch write-up.
 
 Headline numbers (Apple M4 laptop; methodology, capacity probes, and
 one-command reproduction in [docs/benchmarks.md](docs/benchmarks.md)):
@@ -70,7 +71,7 @@ curl -N localhost:8090/v1/chat/completions -d '{
 | `internal/query` | PromQL-lite: grammar, window functions, aggregations |
 | `internal/ui` | embedded dashboards + trace waterfall viewer (`/ui/`) |
 | `deploy/` | VM setup + redeploy scripts, systemd units (see [deploy/README.md](deploy/README.md)) |
-| `docs/` | learning log, ADRs, [benchmarks](docs/benchmarks.md) |
+| `docs/` | learning log, [ADRs](docs/adr/), [benchmarks](docs/benchmarks.md) |
 
 ## Run
 
