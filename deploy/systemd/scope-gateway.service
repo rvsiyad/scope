@@ -1,0 +1,24 @@
+[Unit]
+Description=scope gateway (OpenAI-compatible API on :8090: auth, token budgets, cache, failover, telemetry)
+After=network-online.target docker.service scope-collector.service
+Wants=network-online.target
+
+[Service]
+User=scope
+WorkingDirectory=/opt/scope
+ExecStart=/opt/scope/bin/gateway
+Restart=on-failure
+RestartSec=3
+Environment=SCOPE_COLLECTOR_URL=http://localhost:9091
+# The failover chain: primary Ollama, then the backup instance.
+Environment=SCOPE_OLLAMA_URLS=http://localhost:11434,http://localhost:11435
+# The public demo tenant. The API key is deliberately published (README
+# "Try it") — the token budget is the guardrail: 60k tokens/minute caps
+# what strangers can extract from a free-tier CPU running a 1b model.
+Environment=SCOPE_TENANTS=demo:sk-scope-demo:60000
+# A demo price so the cost dashboards have something to say; local models
+# actually cost $0.
+Environment=SCOPE_PRICE_PER_M_TOKENS=400
+
+[Install]
+WantedBy=multi-user.target

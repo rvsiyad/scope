@@ -1,0 +1,19 @@
+[Unit]
+Description=scope collector (telemetry ingest: WAL -> tsdb + trace store; query API + dashboards on :9091)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=scope
+WorkingDirectory=/opt/scope
+ExecStart=/opt/scope/bin/collector
+Restart=on-failure
+RestartSec=3
+# Data lives under /opt/scope/data (the WAL path's directory is created on
+# boot). Retention keeps the free-tier disk bounded: a week of metrics,
+# three days of traces — dashboards ask for 15 minutes.
+Environment=SCOPE_TSDB_RETENTION=168h
+Environment=SCOPE_TRACE_RETENTION=72h
+
+[Install]
+WantedBy=multi-user.target
