@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scope — live dashboards</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Scope</h1>
+    <nav>
+      <a href="./" class="active">Dashboards</a>
+    </nav>
+    <div id="status" class="status" title="collector health">
+      <span class="dot"></span><span id="status-text">connecting…</span>
+    </div>
+  </header>
+
+  <main id="charts" class="grid"></main>
+
+  <script src="chart.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

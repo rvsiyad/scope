@@ -22,6 +22,7 @@ import (
 	"github.com/rvsiyad/scope/internal/telemetry"
 	"github.com/rvsiyad/scope/internal/tracestore"
 	"github.com/rvsiyad/scope/internal/tsdb"
+	"github.com/rvsiyad/scope/internal/ui"
 	"github.com/rvsiyad/scope/internal/wal"
 )
 
@@ -155,6 +156,13 @@ func New(cfg Config, consumers ...Consumer) (*Server, error) {
 		s.mux.HandleFunc("GET /v1/traces", s.traces.handleList)
 		s.mux.HandleFunc("GET /v1/traces/{id}", s.traces.handleTrace)
 	}
+	// The dashboard rides in the collector because it is a pure client of
+	// the read APIs above — same origin, so the embedded page needs no
+	// CORS, no config, no second server. See internal/ui.
+	s.mux.Handle("GET /ui/", http.StripPrefix("/ui/", ui.Handler()))
+	s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusFound)
+	})
 	// Each store gets its own maintenance loop; done closes when every loop
 	// has stopped (immediately, when none run).
 	var maint sync.WaitGroup

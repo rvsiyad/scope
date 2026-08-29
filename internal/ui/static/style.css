@@ -1,0 +1,141 @@
+/* Scope dashboard chrome. One committed dark look — this is an
+ * observability screen, read in dark ops rooms and demo recordings — with
+ * the palette stepped for the dark surface (series colors validated as a
+ * set for adjacent-pair CVD separation; identity is never color alone:
+ * every multi-series chart carries a legend). */
+
+:root {
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --baseline: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --good: #0ca30c;
+  --critical: #d03b3b;
+  /* Categorical slots, dark steps, fixed order — dashboard.js assigns
+   * series to slots in this order and never re-paints a surviving series
+   * when the set changes. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+nav { display: flex; gap: 14px; flex: 1; }
+nav a { color: var(--ink-2); text-decoration: none; font-size: 13.5px; }
+nav a:hover { color: var(--ink); }
+nav a.active { color: var(--ink); font-weight: 600; }
+
+.status { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12.5px; }
+.status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.status.ok .dot { background: var(--good); }
+.status.down .dot { background: var(--critical); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 14px;
+  padding: 16px 20px 28px;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px 10px;
+  min-width: 0;
+}
+
+.panel h2 {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.panel .now {
+  font-size: 22px;
+  font-weight: 650;
+  min-height: 30px;
+}
+
+.panel svg { display: block; width: 100%; }
+
+.panel .empty {
+  color: var(--muted);
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 160px;
+}
+
+/* Legend: colored chip + text ink (text never wears the series color). */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding-top: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.legend .item { display: inline-flex; align-items: center; gap: 6px; }
+.legend .chip { width: 10px; height: 10px; border-radius: 3px; }
+
+/* Chart internals (SVG). */
+.gridline { stroke: var(--grid); stroke-width: 1; }
+.axisline { stroke: var(--baseline); stroke-width: 1; }
+.tick { fill: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+
+/* Hover layer. */
+.crosshair { stroke: var(--baseline); stroke-width: 1; stroke-dasharray: 3 3; }
+.hoverdot { stroke: var(--surface); stroke-width: 2; }
+
+.tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+  z-index: 10;
+  max-width: 300px;
+}
+.tooltip .t { color: var(--muted); margin-bottom: 3px; font-variant-numeric: tabular-nums; }
+.tooltip .row { display: flex; align-items: center; gap: 6px; }
+.tooltip .row .chip { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.tooltip .row .v { margin-left: auto; padding-left: 12px; font-variant-numeric: tabular-nums; color: var(--ink); }
