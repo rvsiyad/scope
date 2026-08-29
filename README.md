@@ -10,16 +10,16 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: session 8 (phase B underway) — the gateway (streaming proxy,
-hand-rolled circuit breakers, failover, token-budget rate limiting,
-response cache, telemetry emission) is complete; the backend has its
-durability spine (from-scratch WAL with torn-write recovery), its
-compression engine (the Gorilla paper's delta-of-delta + XOR codec,
-measured at 3.07 bytes/sample on real gateway telemetry vs 16 raw), and a
-complete storage engine: head block of live Gorilla streams, immutable
-segment files, inverted label index, unified queries, compaction with
-retention, a cardinality guard, and crash recovery proven by a kill -9
-demo — every acknowledged sample queryable after an unclean death.
+Status: session 11 (phase C) — the gateway (streaming proxy, hand-rolled
+circuit breakers, failover, token-budget rate limiting, response cache,
+telemetry emission) is complete, and so is the backend: a durability
+spine (from-scratch WAL with torn-write recovery), the Gorilla codec
+(delta-of-delta + XOR, measured at 3.07 bytes/sample on real gateway
+telemetry vs 16 raw), a full storage engine (head block, immutable
+segments, inverted label index, compaction, cardinality guard, kill -9
+crash recovery), a trace store, a PromQL-lite query engine, and live
+dashboards with a trace waterfall viewer served straight out of the
+collector. Remaining: benchmarks in CI, deploy, docs.
 
 ## Use it like OpenAI
 
@@ -55,9 +55,10 @@ curl -N localhost:8090/v1/chat/completions -d '{
 | `internal/wal` | append-only log, CRC records, torn-write recovery, fsync policies |
 | `internal/gorilla` | the paper's codec: delta-of-delta timestamps, XOR values |
 | `internal/tsdb` | the storage engine: head block, segment files, inverted label index, unified reads |
+| `internal/tracestore` | trace segments, trace-id + time indexes, waterfall reads |
+| `internal/query` | PromQL-lite: grammar, window functions, aggregations |
+| `internal/ui` | embedded dashboards + trace waterfall viewer (`/ui/`) |
 | `docs/` | learning log, ADRs |
-
-Later phases add `tracestore`, `query`, and `ui`.
 
 ## Run
 
@@ -408,6 +409,37 @@ Watch real queries answer over live gateway traffic:
 
 ```sh
 python3 examples/query_demo.py
+```
+
+## Dashboards
+
+The collector serves its own UI at [`localhost:9091/ui/`](http://localhost:9091/ui/)
+— embedded into the binary with `go:embed`, so the whole observability
+backend ships as one artifact with no node toolchain, asset pipeline, or
+second server. The page is plain JS and a hand-rolled SVG chart component,
+and it is a pure client of the read APIs above: every panel is a
+`/v1/query_range` question asked every 5 seconds over a 15-minute window —
+
+- requests/s split by outcome — `sum by (outcome) (rate(gateway_requests_total[1m]))`
+- time-to-first-token p50/p95/p99 — `quantile_over_time(0.99, gateway_ttft_ms[1m])`
+- tokens/s by model, spend per minute by tenant
+- cache hit rate, derived client-side as hit ÷ (hit + miss) — the query
+  language has no division, and the one consumer wanting a ratio is the
+  right place for it
+
+The **Traces** tab is the request log (`/v1/traces`, newest first); click
+any request and its span tree renders as a waterfall — auth → reserve →
+cache lookup → provider call → settle, bars scaled to the trace's wall
+time, token counts and cost on the spans. Polling over push is a choice,
+not a shortcut: a dashboard is a repeated *question* ("the last 15 minutes,
+as of now"), and re-asking a stateless query API is trivially resumable and
+cacheable where per-viewer push state is neither.
+
+Drive a few minutes of mixed traffic through the whole stack and watch
+every panel move:
+
+```sh
+python3 examples/dashboard_demo.py
 ```
 
 ## Test
