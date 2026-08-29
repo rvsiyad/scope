@@ -19,7 +19,18 @@ telemetry vs 16 raw), a full storage engine (head block, immutable
 segments, inverted label index, compaction, cardinality guard, kill -9
 crash recovery), a trace store, a PromQL-lite query engine, and live
 dashboards with a trace waterfall viewer served straight out of the
-collector. Remaining: benchmarks in CI, deploy, docs.
+collector. Remaining: deploy, docs.
+
+Headline numbers (Apple M4 laptop; methodology, capacity probes, and
+one-command reproduction in [docs/benchmarks.md](docs/benchmarks.md)):
+
+| What | Number |
+|---|---|
+| Ingest, crash-proof acks (fsync=always) | ~25k points/s ceiling, ack p50 5.3 ms |
+| Ingest, relaxed acks (fsync=interval) | ~600k points/s sustained, ack p99 10 ms |
+| Compression on real telemetry | 3.07 bytes/sample vs 16 raw (5.2×) |
+| Dashboard query (`sum by rate`, 15 m/15 s) | p99 5.4 ms |
+| Gateway added overhead per request | p50 +176 µs, p99 +295 µs |
 
 ## Use it like OpenAI
 
