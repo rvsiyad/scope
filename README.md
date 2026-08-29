@@ -69,7 +69,8 @@ curl -N localhost:8090/v1/chat/completions -d '{
 | `internal/tracestore` | trace segments, trace-id + time indexes, waterfall reads |
 | `internal/query` | PromQL-lite: grammar, window functions, aggregations |
 | `internal/ui` | embedded dashboards + trace waterfall viewer (`/ui/`) |
-| `docs/` | learning log, ADRs |
+| `deploy/` | VM setup + redeploy scripts, systemd units (see [deploy/README.md](deploy/README.md)) |
+| `docs/` | learning log, ADRs, [benchmarks](docs/benchmarks.md) |
 
 ## Run
 
@@ -452,6 +453,14 @@ every panel move:
 ```sh
 python3 examples/dashboard_demo.py
 ```
+
+## Deploy
+
+One Ubuntu VM (Oracle's free ARM tier fits), one script, two systemd
+units, CD on merge gated behind a repository variable —
+[deploy/README.md](deploy/README.md) has the whole contract, including
+why the demo tenant's API key is public and what stops that being a
+problem.
 
 ## Test
 
