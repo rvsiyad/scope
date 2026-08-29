@@ -15,10 +15,10 @@ then open the dashboard and start the traffic:
 
 The script plays a small production: two tenants asking questions through
 the gateway for a few minutes — some repeated at temperature 0 (cache
-hits), some fresh (misses, real Ollama generations), the occasional
-oversized ask. Watch the request rate split by outcome, TTFT percentiles
-spread as hits (microseconds to first byte) mix with misses (model speed),
-spend accrue per tenant, and the cache hit rate climb as the question pool
+hits), some fresh (misses, real Ollama generations), a third of them
+streaming (cache bypasses, and the requests that mark TTFT). Watch the
+request rate split by outcome, TTFT percentiles track model speed, spend
+accrue per tenant, and the cache hit rate climb as the question pool
 starts repeating. Then switch to the Traces tab and click any request:
 auth → reserve → cache lookup → provider call → settle, with tokens and
 timings on every span — the trace store's whole reason to exist.
@@ -47,13 +47,15 @@ QUESTIONS = [
 ]
 
 
-def chat(api_key: str, question: str, cacheable: bool) -> str:
+def chat(api_key: str, question: str, cacheable: bool, stream: bool) -> str:
     body = {
         "model": "llama3.2:1b",
         "messages": [{"role": "user", "content": question}],
         "max_tokens": 60,
     }
-    if cacheable:
+    if stream:
+        body["stream"] = True  # streams bypass the cache and mark TTFT
+    elif cacheable:
         body["temperature"] = 0  # deterministic -> cache may serve it
     req = urllib.request.Request(
         GATEWAY + "/v1/chat/completions",
@@ -64,7 +66,11 @@ def chat(api_key: str, question: str, cacheable: bool) -> str:
     )
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
-            json.load(resp)
+            if stream:
+                for _ in resp:  # drain the SSE stream at token speed
+                    pass
+            else:
+                json.load(resp)
             return "ok"
     except urllib.error.HTTPError as e:
         return f"http {e.code}"
@@ -84,7 +90,11 @@ def main() -> None:
         # hits) become common as the run goes on.
         question = QUESTIONS[min(rng.randrange(len(QUESTIONS)),
                                  rng.randrange(len(QUESTIONS)))]
-        outcome = chat(key, question, cacheable=rng.random() < 0.7)
+        # A third of the traffic streams: streams are what put TTFT on the
+        # dashboard (the marker fires on the first SSE token) and show up
+        # as cache=bypass in the request log.
+        outcome = chat(key, question, cacheable=rng.random() < 0.7,
+                       stream=rng.random() < 0.35)
         with lock:
             counts[outcome] = counts.get(outcome, 0) + 1
             total = sum(counts.values())
@@ -98,11 +108,15 @@ def main() -> None:
             t = threading.Thread(target=one_request, daemon=True)
             t.start()
             threads.append(t)
-            time.sleep(rng.uniform(0.4, 2.0))
+            # Open-loop but gentle: a local one-GPU Ollama serializes
+            # generations, so arrivals much faster than ~1/s just queue
+            # up and eventually read as provider errors, not throughput.
+            time.sleep(rng.uniform(0.8, 2.5))
     except KeyboardInterrupt:
         print("\nstopped early")
+    grace = time.time() + 10  # one shared deadline, not 5s per thread
     for t in threads:
-        t.join(timeout=5)
+        t.join(timeout=max(0.0, grace - time.time()))
     print("\ndone — the dashboard keeps the last 15 minutes on screen")
 
 
