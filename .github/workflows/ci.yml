@@ -21,3 +21,8 @@ jobs:
         run: go test -race ./...
       - name: build
         run: go build ./...
+      # A 1-second smoke of the benchmark suites: CI machines produce
+      # meaningless numbers, but the suites must keep running — a broken
+      # benchmark discovered at measurement time is a session lost.
+      - name: bench smoke
+        run: go run ./cmd/bench -duration 1s -ingest-rate 50 -query-rate 20 -overhead-rate 50
