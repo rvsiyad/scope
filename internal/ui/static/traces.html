@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scope — traces</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Scope</h1>
+    <nav>
+      <a href="./">Dashboards</a>
+      <a href="traces.html" class="active">Traces</a>
+    </nav>
+    <div id="status" class="status" title="collector health">
+      <span class="dot"></span><span id="status-text">connecting…</span>
+    </div>
+  </header>
+
+  <main class="traces">
+    <section class="panel" id="log-panel">
+      <h2>Request log</h2>
+      <div id="log"></div>
+    </section>
+    <section class="panel" id="waterfall-panel" hidden>
+      <h2 id="waterfall-title">Trace</h2>
+      <div id="waterfall"></div>
+    </section>
+  </main>
+
+  <script src="traces.js"></script>
+</body>
+</html>
