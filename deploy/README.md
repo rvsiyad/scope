@@ -13,6 +13,12 @@ point of the $0 demo mode; any Ubuntu 24.04 box works.
    OpenAI-compatible gateway) and **9091** (dashboards + query API). Leave
    everything else closed — Ollama (11434/11435) and Postgres are only
    reached from localhost.
+
+   The cloud firewall isn't the only layer: Oracle's Ubuntu images ship a
+   host-level iptables INPUT chain that rejects everything but SSH, so a
+   port can be open in the security list and still refused by the box.
+   setup.sh opens 8090/9091 in that chain itself; on other images the
+   rules are inserted as harmless no-ops ahead of an accept-all policy.
 2. **Run the setup script** on the VM:
 
    ```

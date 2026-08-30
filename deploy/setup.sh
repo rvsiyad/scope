@@ -39,6 +39,15 @@ install -m 644 deploy/systemd/*.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now scope-collector scope-gateway
 
+# Oracle's Ubuntu images reject all inbound traffic but SSH at the host
+# layer, on top of the cloud security list. Open the public ports there
+# too; elsewhere these are no-ops ahead of an accept-all policy.
+for port in 8090 9091; do
+  iptables -C INPUT -p tcp --dport "$port" -m state --state NEW -j ACCEPT 2>/dev/null \
+    || iptables -I INPUT -p tcp --dport "$port" -m state --state NEW -j ACCEPT
+done
+if command -v netfilter-persistent >/dev/null; then netfilter-persistent save; fi
+
 # CD: let the deploy key run exactly one command as root, nothing else.
 echo 'ubuntu ALL=(root) NOPASSWD: /opt/scope/deploy/redeploy.sh' > /etc/sudoers.d/scope-deploy
 chmod 440 /etc/sudoers.d/scope-deploy
