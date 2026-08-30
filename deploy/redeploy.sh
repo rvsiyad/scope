@@ -21,4 +21,4 @@ sleep 3
 curl -fsS localhost:9091/healthz >/dev/null
 curl -fsS localhost:9091/ui/ >/dev/null
 curl -fsS localhost:8090/healthz >/dev/null
-echo "deployed $(git rev-parse --short HEAD)"
+echo "deployed $(sudo -u scope git rev-parse --short HEAD)"
