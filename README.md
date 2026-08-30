@@ -10,7 +10,14 @@ Point any OpenAI SDK at it with a one-line base-URL change; every request flows
 through auth, token-budget rate limiting, response caching, and provider failover,
 and emits spans + metrics into the self-built storage backend.
 
-Status: build complete (sessions 1–13). The gateway (streaming proxy,
+**Live demo**: [dashboards](http://132.145.29.69:9091/ui/) ·
+gateway at `http://132.145.29.69:8090/v1` — point any OpenAI SDK at it
+with API key `sk-scope-demo` (deliberately public; the 60k tokens/minute
+budget is the guardrail) and watch your own request land in the request
+log. Runs a 1b model on a free-tier ARM CPU, so expect demo-grade
+latency.
+
+Status: live. The gateway (streaming proxy,
 hand-rolled circuit breakers, failover, token-budget rate limiting,
 response cache, telemetry emission), the backend (from-scratch WAL with
 torn-write recovery, the Gorilla codec at 3.07 bytes/sample measured on
@@ -19,8 +26,8 @@ compaction, cardinality guard, kill -9 crash recovery, trace store,
 PromQL-lite query engine), live dashboards with a trace waterfall
 viewer, [measured benchmarks](docs/benchmarks.md) with a CI smoke run,
 six [ADRs](docs/adr/), and a [one-script VM deploy](deploy/README.md)
-with gated CD. Remaining: provision the demo VM and flip
-`DEPLOY_ENABLED`; launch write-up.
+with CD on merge (this deployment: Oracle Always Free ARM,
+2 OCPU / 12 GB). Remaining: launch write-up.
 
 Headline numbers (Apple M4 laptop; methodology, capacity probes, and
 one-command reproduction in [docs/benchmarks.md](docs/benchmarks.md)):
