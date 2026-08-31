@@ -44,6 +44,16 @@ func (s *Server) startTrace() *reqTrace {
 	}
 }
 
+// id returns the trace id, or "" when no collector is configured — the
+// caller can hand it to the client, which is how a response gets connected
+// back to its waterfall in the trace store.
+func (t *reqTrace) id() string {
+	if t == nil {
+		return ""
+	}
+	return t.traceID
+}
+
 // span starts timing one phase; the returned func ends it. Phase spans are
 // all direct children of the root — the chat path is a straight pipeline,
 // not a nested one.
