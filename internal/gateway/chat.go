@@ -16,6 +16,12 @@ import (
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	tr := s.startTrace()
 	defer tr.finish()
+	// The trace id goes out on the response so the caller can look up its
+	// own request in the trace store; it must be set here, before any
+	// handler path writes status or body.
+	if id := tr.id(); id != "" {
+		w.Header().Set("X-Scope-Trace-Id", id)
+	}
 
 	endAuth := tr.span("auth")
 	tenant, ok := s.authTenant(w, r)

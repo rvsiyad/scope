@@ -284,6 +284,42 @@ func TestNoCollectorMeansNilEmitter(t *testing.T) {
 	}
 }
 
+func TestResponseCarriesTraceID(t *testing.T) {
+	srv, cap := tracedServer(t, 0)
+	rec := postChatAs(t, srv, "sk-acme", deterministicChat)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+
+	id := rec.Header().Get("X-Scope-Trace-Id")
+	if id == "" {
+		t.Fatal("response must carry X-Scope-Trace-Id")
+	}
+	// The header must name the trace that actually reached the collector.
+	waitFor(t, "the root span", func() bool {
+		_, ok := cap.span("request")
+		return ok
+	})
+	root, _ := cap.span("request")
+	if root.TraceID != id {
+		t.Fatalf("header trace id %q != emitted trace id %q", id, root.TraceID)
+	}
+}
+
+func TestNoCollectorMeansNoTraceIDHeader(t *testing.T) {
+	ollama, _ := fakeOllama(t, func(w http.ResponseWriter, req ollamaChatRequest) {
+		json.NewEncoder(w).Encode(ollamaChatResponse{Message: Message{Content: "ok"}, Done: true, DoneReason: "stop"})
+	})
+	srv := New(Config{OllamaURLs: []string{ollama.URL}})
+	rec := postChatAs(t, srv, "", smallChat)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if got := rec.Header().Get("X-Scope-Trace-Id"); got != "" {
+		t.Fatalf("trace id header = %q, want none without a collector", got)
+	}
+}
+
 func TestCounterMetricsAreCumulative(t *testing.T) {
 	// The _total series carry running totals, not per-request values:
 	// that is what makes rate() work downstream. A miss (15 tokens) then

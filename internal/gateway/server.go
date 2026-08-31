@@ -103,6 +103,20 @@ func NewWithProvider(cfg Config, p Provider) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Browser clients (the dashboard UI lives on the collector's origin)
+	// are first-class callers of an OpenAI-compatible API, so every
+	// response carries CORS headers. The wildcard origin gives nothing
+	// away: authentication is the Bearer key, never the origin.
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Expose-Headers", "X-Scope-Trace-Id, Retry-After")
+	if r.Method == http.MethodOptions {
+		h.Set("Access-Control-Allow-Methods", "GET, POST")
+		h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		h.Set("Access-Control-Max-Age", "86400")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
