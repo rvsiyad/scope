@@ -75,7 +75,58 @@ nav a.active { color: var(--ink); font-weight: 600; }
   border-radius: 8px;
   padding: 12px 14px 10px;
   min-width: 0;
+  transition: border-color 0.3s, box-shadow 0.3s;
 }
+
+/* The demo flashes the panel where its last action's effect lands. */
+.panel.flash {
+  border-color: var(--series-1);
+  box-shadow: 0 0 10px rgba(57, 135, 229, 0.45);
+}
+
+/* Guided demo bar: sits between the header and the charts, where a fresh
+ * page would otherwise open on five empty panels with no hint of what to
+ * do about it. */
+.demo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 16px 20px 0;
+}
+.demo button {
+  border: 0;
+  border-radius: 5px;
+  padding: 7px 16px;
+  background: var(--series-1);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.demo button:disabled { opacity: 0.55; cursor: default; }
+.demo-text { flex: 1; min-width: 260px; }
+.demo-sub { color: var(--muted); font-size: 12.5px; }
+.demo-sub a, .demo-out a { color: var(--series-1); }
+.demo-out {
+  margin-top: 6px;
+  padding: 6px 9px;
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--ink-2);
+  max-height: 54px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.demo-dots { color: var(--muted); letter-spacing: 3px; }
 
 .panel h2 {
   margin: 0 0 2px;

@@ -128,7 +128,7 @@
   ];
 
   for (const c of charts) {
-    c.chart = makeChart(grid, { title: c.title, format: c.format, maxY: c.maxY });
+    c.chart = makeChart(grid, { id: c.id, title: c.title, format: c.format, maxY: c.maxY });
   }
 
   function toPoints(samples) {
