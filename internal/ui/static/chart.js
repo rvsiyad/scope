@@ -65,7 +65,7 @@
       body.replaceChildren();
       const note = document.createElement("div");
       note.className = "empty";
-      note.textContent = "no data yet — press Run demo above, or send a request through the gateway";
+      note.textContent = "no data yet: press Run demo above, or send a request through the gateway";
       body.appendChild(note);
       legend.replaceChildren();
     }

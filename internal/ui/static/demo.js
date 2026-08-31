@@ -120,22 +120,22 @@
     const tag = Date.now().toString(36);
     const ask = "In one short sentence, what does an LLM gateway do? (run " + tag + ")";
 
-    step(1, "Sending one real request through the gateway — the reply streams in below as the model produces it.",
-      "same path as any OpenAI SDK: auth, token-budget rate limit, cache (a miss — this question is new), provider");
+    step(1, "Sending one real request through the gateway. The reply streams in below as the model writes it.",
+      "same path as any OpenAI SDK: auth, token budget check, cache lookup (a miss, this question is new), provider");
     const out = $("demo-out");
     out.hidden = false;
     out.textContent = "";
     const first = await chat(ask, { stream: true, onToken: (t) => { out.textContent += t; } });
-    step(1, "The model answered. First token after " + fmtMs(first.ttft) + " — that wait is TTFT, the latency users feel.",
-      "the gateway measured it too; within a few seconds it lands on the TTFT and requests/s charts");
+    step(1, "The model answered. The first token took " + fmtMs(first.ttft) + ", the wait the TTFT chart tracks.",
+      "the gateway measured it too; within a few seconds it shows up on the TTFT and requests/s charts");
     flash("req", "ttft");
     await sleep(5000);
 
     step(2, "Now the exact same question again.",
       "deterministic requests (temperature 0) are cacheable, and the reply above is already in the response cache");
     const again = await chat(ask, { stream: false });
-    step(2, "Answered from the cache in " + fmtMs(again.ms) + " — no provider call, zero tokens billed.",
-      "a hit is free by design: budgets exist because provider tokens cost money, and a hit consumes none");
+    step(2, "Answered from the cache in " + fmtMs(again.ms) + ". No provider call, no tokens billed.",
+      "a hit costs nothing on purpose: budgets exist because provider tokens cost money, and a hit uses none");
     flash("cache");
     await sleep(5000);
 
@@ -145,7 +145,7 @@
       $("demo-sub").textContent = "sending " + i + " of 3… (a 1b model on a free-tier CPU takes its time)";
       await chat("Reply with only the word ping. (burst " + tag + "-" + i + ")", { stream: false, maxTokens: 16 });
     }
-    step(3, "Done — watch requests/s, tokens/s, and spend tick up on the next poll.",
+    step(3, "Sent. Watch requests/s, tokens/s, and spend tick up on the next poll.",
       "the $/min panel is the demo tenant paying a configured per-token price, so the cost pipeline has numbers");
     flash("req", "tok", "cost");
     await sleep(6000);
@@ -153,12 +153,12 @@
     step(4, "Every request you just sent left a full trace in the trace store.");
     const sub = $("demo-sub");
     sub.replaceChildren(
-      traceLink(first.traceId, "Open the waterfall for the first request →"),
-      " — auth, cache lookup, budget reserve, provider, settle, each phase timed"
+      traceLink(first.traceId, "Open the waterfall for the first request"),
+      ": auth, cache lookup, budget reserve, provider, and settle, each phase timed"
     );
     await sleep(8000);
 
-    step(5, "That's the loop: gateway → WAL → time-series + trace stores → the queries behind these charts.",
+    step(5, "Done. Full path: gateway, write-ahead log, time-series and trace stores, then the queries behind these charts.",
       "");
     $("demo-sub").replaceChildren(
       "Try it yourself: point any OpenAI SDK at " + GW + "/v1 with API key " + KEY + ", or ",
@@ -180,15 +180,15 @@
       await runDemo();
     } catch (err) {
       if (err.status === 429) {
-        step(0, "The rate limiter just did its job: the demo tenant's shared token budget is spent.",
-          "that budget is the guardrail on a deliberately public API key — try again in "
+        step(0, "The rate limiter stepped in: the demo tenant's shared token budget is spent.",
+          "that budget is the guardrail on a deliberately public API key; try again in "
           + (err.retryAfter ? err.retryAfter + " s" : "a minute"));
       } else if (err.unreachable) {
-        step(0, err.message, "the dashboards read the collector, which is up — the gateway is a second service; "
+        step(0, err.message, "the dashboards read the collector, which is up; the gateway is a second service, "
           + "point the demo at yours with ?gateway=<url>");
       } else {
         step(0, "The demo hit a snag: " + err.message,
-          "the dashboards themselves are fine — the charts keep polling the collector");
+          "the dashboards themselves are fine, the charts keep polling the collector");
       }
     }
     btn.textContent = "Run again";
