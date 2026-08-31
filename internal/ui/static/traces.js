@@ -72,7 +72,7 @@
     if (traces.length === 0) {
       const note = document.createElement("div");
       note.className = "empty";
-      note.textContent = "no traces yet — run the demo on the dashboards page, or send a request through the gateway";
+      note.textContent = "no traces yet: run the demo on the dashboards page, or send a request through the gateway";
       log.replaceChildren(note);
     }
   }
