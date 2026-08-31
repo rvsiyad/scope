@@ -47,6 +47,7 @@
   window.makeChart = function (container, opts) {
     const panel = document.createElement("section");
     panel.className = "panel";
+    if (opts.id) panel.id = "panel-" + opts.id; // lets the demo flash the panel an effect lands on
     const title = document.createElement("h2");
     title.textContent = opts.title;
     panel.appendChild(title);
@@ -64,7 +65,7 @@
       body.replaceChildren();
       const note = document.createElement("div");
       note.className = "empty";
-      note.textContent = "no data yet — send a request through the gateway";
+      note.textContent = "no data yet — press Run demo above, or send a request through the gateway";
       body.appendChild(note);
       legend.replaceChildren();
     }

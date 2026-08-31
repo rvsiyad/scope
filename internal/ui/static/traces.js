@@ -72,7 +72,7 @@
     if (traces.length === 0) {
       const note = document.createElement("div");
       note.className = "empty";
-      note.textContent = "no traces yet — send a request through the gateway";
+      note.textContent = "no traces yet — run the demo on the dashboards page, or send a request through the gateway";
       log.replaceChildren(note);
     }
   }
@@ -165,6 +165,11 @@
       console.error(err);
     }
   }
+
+  // ?trace=<id> deep-links straight to one waterfall — how the demo (or
+  // anything holding an X-Scope-Trace-Id) hands off to this page.
+  const preselect = new URLSearchParams(location.search).get("trace");
+  if (preselect) select(preselect);
 
   refresh();
   setInterval(refresh, POLL_MS);

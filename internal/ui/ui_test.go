@@ -20,6 +20,7 @@ func TestHandlerServesStaticTree(t *testing.T) {
 		{"/traces.js", "text/javascript", "/v1/traces"},
 		{"/chart.js", "text/javascript", "makeChart"},
 		{"/dashboard.js", "text/javascript", "query_range"},
+		{"/demo.js", "text/javascript", "chat/completions"},
 		{"/style.css", "text/css", "--series-1"},
 	} {
 		rec := httptest.NewRecorder()
