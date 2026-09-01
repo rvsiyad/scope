@@ -126,7 +126,7 @@
     out.hidden = false;
     out.textContent = "";
     const first = await chat(ask, { stream: true, onToken: (t) => { out.textContent += t; } });
-    step(1, "The model answered. The first token took " + fmtMs(first.ttft) + ", the wait the TTFT chart tracks.",
+    step(1, "The model answered. That " + fmtMs(first.ttft) + " wait for the first token is what the TTFT chart measures.",
       "the gateway measured it too; within a few seconds it shows up on the TTFT and requests/s charts");
     flash("req", "ttft");
     await sleep(5000);
